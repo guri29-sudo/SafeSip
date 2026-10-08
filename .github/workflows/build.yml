@@ -65,6 +65,12 @@ jobs:
       - name: Install Dependencies
         run: npm ci || npm install
 
+      - name: Configure Xcode Node Environment
+        working-directory: ios
+        run: |
+          echo "export NODE_BINARY=$(which node)" > .xcode.env.local
+          cat .xcode.env.local
+
       - name: Install CocoaPods
         working-directory: ios
         run: pod install
@@ -75,9 +81,10 @@ jobs:
           xcodebuild -workspace SafeSip.xcworkspace \
             -scheme SafeSip \
             -configuration Debug \
-            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Upload iOS Build Output
         uses: actions/upload-artifact@v4
