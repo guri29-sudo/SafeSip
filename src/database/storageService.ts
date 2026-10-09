@@ -212,7 +212,7 @@ class SafeSipDatabaseService {
     return [...this.registeredAccounts];
   }
 
-  public saveRegisteredAccount(account: RegisteredAccount): void {
+  public async saveRegisteredAccount(account: RegisteredAccount): Promise<void> {
     const existingIndex = this.registeredAccounts.findIndex(
       a =>
         a.email.toLowerCase() === account.email.toLowerCase() ||
@@ -223,7 +223,7 @@ class SafeSipDatabaseService {
     } else {
       this.registeredAccounts.push(account);
     }
-    this.persistRegisteredAccounts();
+    await this.persistRegisteredAccounts();
   }
 
   public findAccountByEmailOrPhone(identifier: string): RegisteredAccount | undefined {

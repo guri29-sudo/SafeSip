@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
@@ -41,6 +41,7 @@ export const RootNavigator: React.FC = () => {
     isAuthenticated,
     isGuestMode: storeGuestMode,
     setGuestMode,
+    bootApp,
     logout,
     activeTab,
     setActiveTab,
@@ -57,6 +58,11 @@ export const RootNavigator: React.FC = () => {
   const activeGuest = isGuestMode || storeGuestMode || (!isAuthenticated && !currentUser);
   const [selectedSource, setSelectedSource] = useState<WaterSource | null>(null);
   const [activeTestResult, setActiveTestResult] = useState<WaterTest | null>(null);
+
+  // Load persisted session and offline data on app boot
+  useEffect(() => {
+    bootApp();
+  }, [bootApp]);
 
   // Navigation handlers
   const navigateTo = (screen: ScreenName) => {
@@ -216,9 +222,12 @@ export const RootNavigator: React.FC = () => {
         return (
           <SplashScreen
             onFinish={() => {
-              // Always go to onboarding — never auto-bypass auth
-              // isAuthenticated is in-memory only (not persisted), so always false on fresh launch
-              navigateTo('onboarding');
+              const state = useAppStore.getState();
+              if (state.isAuthenticated && state.currentUser) {
+                navigateTo('main');
+              } else {
+                navigateTo('onboarding');
+              }
             }}
           />
         );

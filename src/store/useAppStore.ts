@@ -90,19 +90,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   isBootReady: false,
 
   bootApp: async () => {
-    // Load all persisted data from AsyncStorage
+    // 1. Load all persisted data from AsyncStorage
     await dbService.load();
 
-    // Check if Supabase has a valid session (persisted by AsyncStorage)
-    let restoredUser: User | null = null;
-    let isAuthenticated = false;
+    // 2. Check local database for persisted user session
+    let restoredUser: User | null = dbService.getCurrentUser();
+    let isAuthenticated = !!restoredUser;
 
+    // 3. If Supabase is configured and has an active session, refresh profile
     if (isSupabaseConfigured()) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const sbUser = session.user;
-          // Try to load profile
           let profile: any = null;
           try {
             const { data } = await supabase
@@ -115,23 +115,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
           restoredUser = {
             id: sbUser.id,
-            fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email || 'User',
-            email: sbUser.email || '',
-            phone: profile?.phone || sbUser.phone || undefined,
-            createdAt: sbUser.created_at,
+            fullName: profile?.full_name || sbUser.user_metadata?.full_name || restoredUser?.fullName || 'User',
+            email: sbUser.email || restoredUser?.email || '',
+            phone: profile?.phone || sbUser.phone || restoredUser?.phone,
+            createdAt: sbUser.created_at || restoredUser?.createdAt || new Date().toISOString(),
           };
           isAuthenticated = true;
-          dbService.setCurrentUserSync(restoredUser);
+          await dbService.setCurrentUser(restoredUser);
         }
       } catch {}
-    }
-
-    // Fallback: use locally persisted user (offline mode)
-    if (!restoredUser) {
-      restoredUser = dbService.getCurrentUser();
-      if (restoredUser) {
-        isAuthenticated = true;
-      }
     }
 
     set({
@@ -161,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   login: async (emailOrPhone, password) => {
+    await dbService.load();
     const cleanInput = emailOrPhone.trim();
     if (!cleanInput) {
       throw new Error('Please enter your registered email address or phone number.');
@@ -248,7 +241,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
 
         // Cache into local registered accounts
-        dbService.saveRegisteredAccount({
+        await dbService.saveRegisteredAccount({
           id: user.id,
           fullName: user.fullName,
           email: user.email,
@@ -269,6 +262,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   signUp: async (fullName, email, phone, password) => {
+    await dbService.load();
     const cleanName = fullName.trim();
     const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone.trim();
@@ -330,7 +324,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       password,
       createdAt: new Date().toISOString(),
     };
-    dbService.saveRegisteredAccount(newAccount);
+    await dbService.saveRegisteredAccount(newAccount);
 
     const user: User = {
       id: userId,
