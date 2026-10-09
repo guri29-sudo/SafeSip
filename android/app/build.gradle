@@ -78,6 +78,9 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.safesip"
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId "com.safesip"
         minSdkVersion rootProject.ext.minSdkVersion
