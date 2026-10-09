@@ -1,28 +1,18 @@
 import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config/env';
 
 /**
- * In-memory fallback storage for React Native when AsyncStorage is not linked.
- * Prevents "localStorage is not available" crashes.
- */
-const memoryStorage = {
-  data: {} as Record<string, string>,
-  getItem: (key: string) => memoryStorage.data[key] ?? null,
-  setItem: (key: string, value: string) => { memoryStorage.data[key] = value; },
-  removeItem: (key: string) => { delete memoryStorage.data[key]; },
-};
-
-/**
- * Supabase client configuration.
- * Credentials are loaded safely from ../config/env (or local/CI environment).
+ * Supabase client — uses AsyncStorage for session persistence.
+ * Session is restored on every app launch (no login required after first login).
  */
 const safeUrl = SUPABASE_URL || 'https://placeholder.supabase.co';
 const safeKey = SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 export const supabase = createClient(safeUrl, safeKey, {
   auth: {
-    storage: memoryStorage,
+    storage: AsyncStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
@@ -42,4 +32,3 @@ export const isSupabaseConfigured = (): boolean =>
     SUPABASE_URL.startsWith('https://') &&
     SUPABASE_URL.includes('.supabase.co')
   );
-

@@ -249,10 +249,10 @@ export const CommunityMapScreen: React.FC<CommunityMapScreenProps> = ({ onSelect
         attributionControl: false
       }).setView([${defaultCenter.lat}, ${defaultCenter.lng}], 13);
 
-      // Clean, modern high-res tile layer
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      // OpenStreetMap tiles — completely FREE, no API key required
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
-        subdomains: 'abcd'
+        attribution: '© OpenStreetMap'
       }).addTo(map);
 
       markersLayer.addTo(map);

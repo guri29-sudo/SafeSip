@@ -19,13 +19,15 @@ import { useAppStore } from '../store/useAppStore';
 interface LoginScreenProps {
   onSuccess: () => void;
   onNavigateToSignUp: () => void;
+  onGuestMode?: () => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onSuccess,
   onNavigateToSignUp,
+  onGuestMode,
 }) => {
-  const { login, loginOffline } = useAppStore();
+  const { login } = useAppStore();
 
   const [emailOrPhone, setEmailOrPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +38,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     const newErrors: Record<string, string> = {};
 
     if (!emailOrPhone.trim()) {
-      newErrors.emailOrPhone = 'Please enter your email or registered phone number';
+      newErrors.emailOrPhone = 'Please enter your registered email or phone number';
     }
 
     if (!password) {
@@ -51,22 +53,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     if (!validate()) return;
     setLoading(true);
     try {
-      await login(emailOrPhone, password);
+      await login(emailOrPhone.trim(), password);
       onSuccess();
     } catch (err: any) {
       setErrors({
-        form: err?.message || 'Invalid credentials. Please verify and try again.',
+        form: err?.message || 'Invalid credentials. Please check your email/phone and password.',
       });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFieldMode = async () => {
-    setLoading(true);
-    try {
-      await loginOffline(emailOrPhone.trim() || 'Field Operator');
-      onSuccess();
     } finally {
       setLoading(false);
     }
@@ -75,18 +67,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const handleForgotPassword = () => {
     Alert.alert(
       'Password Reset',
-      `A password reset link will be dispatched to ${emailOrPhone || 'your registered contact'}.`,
+      `A password reset link will be sent to your registered email: ${emailOrPhone.trim() || 'your email address'}.`,
       [{ text: 'OK' }]
     );
-  };
-
-  const handleOAuth = (provider: 'Google' | 'Apple') => {
-    setLoading(true);
-    setTimeout(async () => {
-      await loginOffline(`user@${provider.toLowerCase()}.com`);
-      setLoading(false);
-      onSuccess();
-    }, 500);
   };
 
   return (
@@ -107,15 +90,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             </View>
             <Text style={styles.title}>Welcome back</Text>
             <Text style={styles.subtitle}>
-              Sign in to sync your SafeSip bottle, view test records, and access community alerts.
+              Sign in with your registered email or phone number to access SafeSip.
             </Text>
           </View>
 
           {/* Form */}
           <View style={styles.form}>
             <Input
-              label="Email or Phone"
-              placeholder="name@example.com or phone"
+              label="Email or Phone Number"
+              placeholder="name@example.com or +91 9876543210"
               value={emailOrPhone}
               onChangeText={text => {
                 setEmailOrPhone(text);
@@ -154,37 +137,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               size="lg"
               style={{ marginTop: 8 }}
             />
-            <Button
-              title="🌐 Field Mode (No Internet)"
-              variant="secondary"
-              onPress={handleFieldMode}
-              loading={loading}
-              size="lg"
-              style={{ marginTop: 10 }}
-            />
           </View>
 
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Auth */}
-          <View style={styles.socialButtons}>
-            <Button
-              title="Continue with Google"
-              variant="secondary"
-              onPress={() => handleOAuth('Google')}
-              style={{ marginBottom: 10 }}
-            />
-            <Button
-              title="Continue with Apple"
-              variant="secondary"
-              onPress={() => handleOAuth('Apple')}
-            />
-          </View>
+          {/* Guest Mode */}
+          {onGuestMode && (
+            <View style={styles.guestContainer}>
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+              <TouchableOpacity style={styles.guestBtn} onPress={onGuestMode} activeOpacity={0.7}>
+                <Icon name="eye" size={16} color={colors.textSecondary} />
+                <Text style={styles.guestBtnText}>Browse as Guest (View Only)</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Bottom Link */}
           <View style={styles.footerRow}>
@@ -234,7 +202,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   form: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   forgotContainer: {
     alignSelf: 'flex-end',
@@ -251,11 +219,17 @@ const styles = StyleSheet.create({
     color: colors.unsafe,
     marginBottom: 10,
     textAlign: 'center',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    padding: 8,
+    borderRadius: radius.sm,
+  },
+  guestContainer: {
+    marginBottom: 20,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 14,
   },
   dividerLine: {
     flex: 1,
@@ -268,13 +242,29 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '500',
   },
-  socialButtons: {
-    marginBottom: 28,
+  guestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: colors.surfaceSecondary,
+  },
+  guestBtnText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    fontWeight: '500',
   },
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 4,
   },
   footerText: {
     fontSize: 13,

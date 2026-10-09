@@ -30,6 +30,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -47,13 +48,21 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
     }
 
     if (!phone.trim()) {
-      newErrors.phone = 'Phone number is required for SMS device alerts';
+      newErrors.phone = 'Phone number is required for account recovery and alerts';
+    } else if (phone.replace(/\D/g, '').length < 10) {
+      newErrors.phone = 'Please enter a valid phone number (min. 10 digits)';
     }
 
     if (!password) {
       newErrors.password = 'Password is required';
     } else if (password.length < 8) {
       newErrors.password = 'Password must be at least 8 characters';
+    }
+
+    if (!confirmPassword) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
     }
 
     setErrors(newErrors);
@@ -64,26 +73,13 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
     if (!validate()) return;
     setLoading(true);
     try {
-      await signUp(fullName, email, phone, password);
+      await signUp(fullName.trim(), email.trim().toLowerCase(), phone.trim(), password);
       onSuccess();
-    } catch {
-      setErrors({ form: 'Failed to create account. Please try again.' });
+    } catch (err: any) {
+      setErrors({ form: err?.message || 'Failed to create account. Please try again.' });
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleOAuth = (provider: 'Google' | 'Apple') => {
-    setLoading(true);
-    setTimeout(async () => {
-      await signUp(
-        provider === 'Apple' ? 'Apple Member' : 'Google Explorer',
-        `user@${provider.toLowerCase()}.com`,
-        '+1 555-0192'
-      );
-      setLoading(false);
-      onSuccess();
-    }, 600);
   };
 
   return (
@@ -104,7 +100,15 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
             </View>
             <Text style={styles.title}>Create SafeSip Account</Text>
             <Text style={styles.subtitle}>
-              Monitor drinking water, link your smart bottle, and contribute to community maps.
+              Register with your email and phone number to monitor water quality and contribute to community maps.
+            </Text>
+          </View>
+
+          {/* Registration Note */}
+          <View style={styles.infoNote}>
+            <Icon name="info" size={14} color={colors.primary} />
+            <Text style={styles.infoText}>
+              Registration uses your Gmail and phone number only. No third-party sign-in.
             </Text>
           </View>
 
@@ -123,8 +127,8 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
             />
 
             <Input
-              label="Email Address"
-              placeholder="name@example.com"
+              label="Gmail / Email Address"
+              placeholder="name@gmail.com"
               value={email}
               onChangeText={text => {
                 setEmail(text);
@@ -137,7 +141,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
 
             <Input
               label="Phone Number"
-              placeholder="+1 (555) 000-0000"
+              placeholder="+91 9876543210"
               value={phone}
               onChangeText={text => {
                 setPhone(text);
@@ -159,36 +163,26 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({
               secureTextEntry
             />
 
+            <Input
+              label="Confirm Password"
+              placeholder="Re-enter your password"
+              value={confirmPassword}
+              onChangeText={text => {
+                setConfirmPassword(text);
+                if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: '' }));
+              }}
+              error={errors.confirmPassword}
+              secureTextEntry
+            />
+
             {errors.form && <Text style={styles.formError}>{errors.form}</Text>}
 
             <Button
-              title="Sign Up"
+              title="Create Account"
               onPress={handleSignUp}
               loading={loading}
               size="lg"
               style={{ marginTop: 8 }}
-            />
-          </View>
-
-          {/* Divider */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Social Auth */}
-          <View style={styles.socialButtons}>
-            <Button
-              title="Continue with Google"
-              variant="secondary"
-              onPress={() => handleOAuth('Google')}
-              style={{ marginBottom: 10 }}
-            />
-            <Button
-              title="Continue with Apple"
-              variant="secondary"
-              onPress={() => handleOAuth('Apple')}
             />
           </View>
 
@@ -216,7 +210,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
   logoBadge: {
     width: 38,
@@ -239,6 +233,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 20,
   },
+  infoNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: colors.primarySubtle,
+    padding: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    marginBottom: 20,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.primary,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
   form: {
     marginBottom: 20,
   },
@@ -247,25 +259,9 @@ const styles = StyleSheet.create({
     color: colors.unsafe,
     marginBottom: 10,
     textAlign: 'center',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  dividerText: {
-    paddingHorizontal: 12,
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: '500',
-  },
-  socialButtons: {
-    marginBottom: 24,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    padding: 8,
+    borderRadius: radius.sm,
   },
   footerRow: {
     flexDirection: 'row',

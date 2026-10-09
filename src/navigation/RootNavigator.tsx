@@ -51,6 +51,7 @@ export const RootNavigator: React.FC = () => {
   } = useAppStore();
 
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('splash');
+  const [isGuestMode, setIsGuestMode] = useState(false);
   const [selectedSource, setSelectedSource] = useState<WaterSource | null>(null);
   const [activeTestResult, setActiveTestResult] = useState<WaterTest | null>(null);
 
@@ -182,7 +183,9 @@ export const RootNavigator: React.FC = () => {
         return (
           <SplashScreen
             onFinish={() => {
-              navigateTo(isAuthenticated ? 'main' : 'onboarding');
+              // Always go to onboarding — never auto-bypass auth
+              // isAuthenticated is in-memory only (not persisted), so always false on fresh launch
+              navigateTo('onboarding');
             }}
           />
         );
@@ -192,6 +195,10 @@ export const RootNavigator: React.FC = () => {
           <OnboardingScreen
             onGetStarted={() => navigateTo('signup')}
             onLoginPress={() => navigateTo('login')}
+            onGuestMode={() => {
+              setIsGuestMode(true);
+              navigateTo('main');
+            }}
           />
         );
 
@@ -206,8 +213,15 @@ export const RootNavigator: React.FC = () => {
       case 'login':
         return (
           <LoginScreen
-            onSuccess={() => navigateTo('main')}
+            onSuccess={() => {
+              setIsGuestMode(false);
+              navigateTo('main');
+            }}
             onNavigateToSignUp={() => navigateTo('signup')}
+            onGuestMode={() => {
+              setIsGuestMode(true);
+              navigateTo('main');
+            }}
           />
         );
 

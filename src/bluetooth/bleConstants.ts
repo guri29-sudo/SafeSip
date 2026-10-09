@@ -1,6 +1,8 @@
 /**
- * SafeSip ESP32 Bluetooth Low Energy (BLE) GATT Architecture
- * Standardized UUIDs matching ESP32 FreeRTOS firmware
+ * SafeSip Arduino Nano + HC-05 Bluetooth Serial (SPP) Configuration
+ * The HC-05 module connects to Arduino Nano via Serial (D10=RX, D11=TX)
+ * Communication uses Classic Bluetooth SPP — NOT BLE GATT.
+ * These UUIDs are kept for reference only (not used in HC-05 SPP mode).
  */
 export const SAFESIP_BLE_CONFIG = {
   // Primary SafeSip Service UUID

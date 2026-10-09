@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows, spacing } from '../theme';
 import { Button } from '../components/Button';
@@ -8,11 +8,13 @@ import { Icon, IconName } from '../components/Icon';
 interface OnboardingScreenProps {
   onGetStarted: () => void;
   onLoginPress: () => void;
+  onGuestMode?: () => void;
 }
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   onGetStarted,
   onLoginPress,
+  onGuestMode,
 }) => {
   const features: {
     title: string;
@@ -93,6 +95,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
               Log In
             </Text>
           </View>
+          {onGuestMode && (
+            <TouchableOpacity style={styles.guestBtn} onPress={onGuestMode} activeOpacity={0.7}>
+              <Icon name="eye" size={15} color={colors.textMuted} />
+              <Text style={styles.guestBtnText}>Browse as Guest (View Only)</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -214,5 +222,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: colors.primary,
+  },
+  guestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    backgroundColor: colors.surfaceSecondary,
+  },
+  guestBtnText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
 });

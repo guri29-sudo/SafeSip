@@ -2,17 +2,26 @@
  * SafeSip HC-05 Classic Bluetooth Service
  *
  * HC-05 is a Classic Bluetooth (BR/EDR) module using the SPP (Serial Port Profile).
- * It is NOT a BLE device. This service handles:
+ * It communicates with an ARDUINO NANO (NOT ESP32) which reads:
+ *   - pH Sensor (A0)
+ *   - TDS Sensor (A1)
+ *   - Turbidity Sensor (A2)
+ *   - Conductivity/EC Sensor (A3)
+ *   - DHT22 Temperature & Humidity Sensor (Digital)
+ *   - NEO-6M GPS Module (D3/D4 Software Serial)
+ *   - OLED Display I2C (A4 SDA / A5 SCL)
+ *
+ * This service handles:
  *   1. Android runtime permission requests (BLUETOOTH_CONNECT, ACCESS_FINE_LOCATION)
  *   2. Discovering already-paired Classic BT devices (HC-05 appears in paired list)
  *   3. Connecting via SPP socket
- *   4. Sending AT commands to ESP32 to trigger sensor readings
+ *   4. Sending commands to Arduino Nano via HC-05 to trigger sensor readings
  *   5. Parsing JSON telemetry streamed back over the serial channel
  *
  * HC-05 default settings:
  *   Name: HC-05 (or renamed e.g. "SafeSip_0012" via AT+NAME)
  *   PIN:  1234 (default) — pair from Android Settings > Bluetooth first
- *   Baud: 9600 (or 115200 if reprogrammed via AT+UART)
+ *   Baud: 9600 (Arduino Nano default Serial baud rate)
  *
  * Required: Install react-native-bluetooth-classic
  *   npm install react-native-bluetooth-classic
@@ -206,12 +215,12 @@ class SafeSipBluetoothService {
       // Get all bonded/paired Classic Bluetooth devices
       const pairedDevices: any[] = await RNBluetoothClassic.getBondedDevices();
       
-      // Sort so HC-05 / SafeSip / ESP32 devices appear first
+      // Sort so HC-05 / SafeSip / Arduino Nano devices appear first
       const sortedPaired = [...pairedDevices].sort((a: any, b: any) => {
         const aName = (a.name || '').toLowerCase();
         const bName = (b.name || '').toLowerCase();
-        const isASafeSip = aName.includes('safesip') || aName.includes('hc-05') || aName.includes('hc05') || aName.includes('esp32');
-        const isBSafeSip = bName.includes('safesip') || bName.includes('hc-05') || bName.includes('hc05') || bName.includes('esp32');
+        const isASafeSip = aName.includes('safesip') || aName.includes('hc-05') || aName.includes('hc05') || aName.includes('arduino');
+        const isBSafeSip = bName.includes('safesip') || bName.includes('hc-05') || bName.includes('hc05') || bName.includes('arduino');
         if (isASafeSip && !isBSafeSip) return -1;
         if (!isASafeSip && isBSafeSip) return 1;
         return (a.name || '').localeCompare(b.name || '');
@@ -223,7 +232,7 @@ class SafeSipBluetoothService {
           const isKnown = dName.toLowerCase().includes('safesip') ||
             dName.toLowerCase().includes('hc-05') ||
             dName.toLowerCase().includes('hc05') ||
-            dName.toLowerCase().includes('esp32');
+            dName.toLowerCase().includes('arduino');
           return {
             id: d.address,
             name: dName,
@@ -337,10 +346,11 @@ class SafeSipBluetoothService {
   // ─── Live Sensor Sampling (HC-05 SPP AT Commands) ────────────────────────
 
   /**
-   * Sends "START_TEST\n" to the ESP32 via HC-05 SPP.
-   * The ESP32 firmware should respond with newline-delimited JSON:
+   * Sends "START_TEST\n" to the Arduino Nano via HC-05 SPP.
+   * The Arduino Nano firmware responds with newline-delimited JSON:
    *   {"pH":7.4,"tds":125,"ec":310,"turb":0.8,"temp":22.5,"prog":45,"stage":"Measuring pH..."}
    * Final packet has "prog":100 and includes "status":"SAFE"|"CAUTION"|"UNSAFE"
+   * Sensors: pH(A0), TDS(A1), Turbidity(A2), EC(A3), DHT22(temp/humidity), NEO-6M(GPS)
    */
   public startLiveTest(
     onProgress: BleTelemetryCallback,
@@ -369,7 +379,7 @@ class SafeSipBluetoothService {
 
     (async () => {
       try {
-        // Send START_TEST command to ESP32 via HC-05
+        // Send START_TEST command to Arduino Nano via HC-05 SPP
         await this.nativeConnection.write('START_TEST\n');
 
         // Listen for incoming data chunks
@@ -478,11 +488,12 @@ class SafeSipBluetoothService {
     let progress = 0;
     const target = { pH: 7.4, tds: 125, ec: 310, turb: 0.8, temp: 22.5 };
     const stages = [
-      { upTo: 20, text: 'HC-05 SPP handshake…' },
-      { upTo: 45, text: 'Measuring optical turbidity…' },
-      { upTo: 70, text: 'pH & EC probe stabilising…' },
-      { upTo: 90, text: 'ESP32 safety classification…' },
-      { upTo: 100, text: 'Finalising sensor profile…' },
+      { upTo: 20, text: 'HC-05 SPP handshake with Arduino Nano…' },
+      { upTo: 40, text: 'DHT22 reading temperature & humidity…' },
+      { upTo: 60, text: 'Measuring pH (A0) & TDS (A1)…' },
+      { upTo: 75, text: 'Turbidity (A2) & EC sensor (A3)…' },
+      { upTo: 90, text: 'Arduino Nano safety classification…' },
+      { upTo: 100, text: 'Finalising water quality profile…' },
     ];
 
     this.activeTestTimer = setInterval(() => {

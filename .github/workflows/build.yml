@@ -1,4 +1,4 @@
-name: SafeSip CI Build (Android APK & iOS)
+name: SafeSip CI — Android APK
 
 on:
   push:
@@ -8,11 +8,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─────────────────────────── Android ───────────────────────────────────────
+  # ─────────────────────────── Android APK ───────────────────────────────────
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -47,7 +48,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           mkdir -p src/config
-          cat << EOF > src/config/env.local.ts
+          cat <<EOF > src/config/env.local.ts
           export const ENV = {
             SUPABASE_URL: '${SUPABASE_URL}',
             SUPABASE_ANON_KEY: '${SUPABASE_ANON_KEY}',
@@ -76,123 +77,8 @@ jobs:
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: SafeSip-Android-Debug-APK
+          name: SafeSip-Android-APK-${{ github.run_number }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-  # ─────────────────────────── iOS ────────────────────────────────────────────
-  build-ios:
-    name: Build iOS Archive
-    runs-on: macos-15
-    timeout-minutes: 45       # ← Prevents infinite hang; kills after 45 min
-
-    env:
-      # Disable Flipper — causes pod install hangs on CI with React Native 0.73+
-      NO_FLIPPER: '1'
-      # Fix known Xcode 16 CI serialisation hang
-      SWIFT_SERIALIZE_DEBUGGING_OPTIONS: 'NO'
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Select Best Available Xcode
-        run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer 2>/dev/null || \
-          sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer 2>/dev/null || \
-          sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer 2>/dev/null || true
-          xcodebuild -version
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install JS Dependencies
-        run: npm ci
-
-      - name: Write Xcode NODE_BINARY env file
-        working-directory: ios
-        run: echo "export NODE_BINARY=$(which node)" > .xcode.env.local
-
-      # Cache CocoaPods to avoid re-downloading on every run (the main hang cause)
-      - name: Cache CocoaPods
-        id: cocoapods-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ios/Pods
-            ios/Podfile.lock
-            ~/Library/Caches/CocoaPods
-            ~/.cocoapods
-          key: cocoapods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock') }}
-          restore-keys: cocoapods-${{ runner.os }}-
-
-      - name: Install CocoaPods
-        working-directory: ios
-        run: |
-          pod install
-        timeout-minutes: 15
-
-      - name: Inject Supabase Secrets
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-          mkdir -p src/config
-          cat << EOF > src/config/env.local.ts
-          export const ENV = {
-            SUPABASE_URL: '${SUPABASE_URL}',
-            SUPABASE_ANON_KEY: '${SUPABASE_ANON_KEY}',
-          };
-          EOF
-
-      - name: Bundle iOS JavaScript
-        run: |
-          npx react-native bundle \
-            --platform ios \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output ios/main.jsbundle \
-            --assets-dest ios
-
-      - name: Build iOS (arm64, no code signing)
-        working-directory: ios
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -workspace SafeSip.xcworkspace \
-            -scheme SafeSip \
-            -configuration Debug \
-            -sdk iphoneos \
-            -arch arm64 \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE="" \
-            SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            build
-        timeout-minutes: 25
-
-      - name: Package IPA
-        working-directory: ios
-        run: |
-          mkdir -p Payload
-          APP_PATH=$(find build/Build/Products -name "*.app" -type d | head -n 1)
-          if [ -z "$APP_PATH" ]; then
-            echo "Error: No .app file found in build products!"
-            find build -maxdepth 4 -ls
-            exit 1
-          fi
-          echo "Found app at: $APP_PATH"
-          cp -r "$APP_PATH" Payload/SafeSip.app
-          zip -r SafeSip-Debug.ipa Payload
-
-      - name: Upload iOS IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: SafeSip-iOS-Debug-IPA
-          path: ios/SafeSip-Debug.ipa
-
+  # iOS build is future scope — will be added after APK is production-ready
+  # To add iOS: create a separate build-ios.yml job when ready

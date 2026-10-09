@@ -13,18 +13,25 @@ import { syncWorker } from '../api/syncWorker';
 import { supabase, isSupabaseConfigured } from '../api/supabaseClient';
 
 interface AppState {
+  // --- App Boot ---
+  isBootReady: boolean;
+  bootApp: () => Promise<void>;
+
   // --- Auth ---
   currentUser: User | null;
   isAuthenticated: boolean;
-  login: (emailOrPhone: string, password?: string) => Promise<boolean>;
+  isGuestMode: boolean;
+  login: (emailOrPhone: string, password: string) => Promise<boolean>;
   loginOffline: (name?: string) => Promise<boolean>;
-  signUp: (fullName: string, email: string, phone: string, password?: string) => Promise<boolean>;
-  logout: () => void;
+  signUp: (fullName: string, email: string, phone: string, password: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  forgotPassword: (email: string) => Promise<void>;
+  setGuestMode: (guest: boolean) => void;
 
   // --- Bluetooth Hardware ---
   connectedDevice: Device | null;
   discoveredDevices: Device[];
-  bleState: BleConnectionState; // 'disconnected'|'scanning'|'connecting'|'connected'|'permission_denied'|'bluetooth_off'
+  bleState: BleConnectionState;
   startBleScan: () => Promise<void>;
   connectBleDevice: (deviceId: string) => Promise<void>;
   connectSimulatedDevice: () => void;
@@ -80,25 +87,95 @@ const defaultSensorReading: SensorReading = {
 };
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // Auth — start unauthenticated; user must log in for real
-  currentUser: dbService.getCurrentUser(),
-  isAuthenticated: dbService.getCurrentUser() !== null,
+  // ─── Boot ────────────────────────────────────────────────────────────────
+  isBootReady: false,
+
+  bootApp: async () => {
+    // Load all persisted data from AsyncStorage
+    await dbService.load();
+
+    // Check if Supabase has a valid session (persisted by AsyncStorage)
+    let restoredUser: User | null = null;
+    let isAuthenticated = false;
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const sbUser = session.user;
+          // Try to load profile
+          let profile: any = null;
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', sbUser.id)
+              .single();
+            profile = data;
+          } catch {}
+
+          restoredUser = {
+            id: sbUser.id,
+            fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email || 'User',
+            email: sbUser.email || '',
+            phone: profile?.phone || sbUser.phone || undefined,
+            createdAt: sbUser.created_at,
+          };
+          isAuthenticated = true;
+          dbService.setCurrentUserSync(restoredUser);
+        }
+      } catch {}
+    }
+
+    // Fallback: use locally persisted user (offline mode)
+    if (!restoredUser) {
+      restoredUser = dbService.getCurrentUser();
+      if (restoredUser) {
+        isAuthenticated = true;
+      }
+    }
+
+    set({
+      isBootReady: true,
+      currentUser: restoredUser,
+      isAuthenticated,
+      isGuestMode: false,
+      tests: dbService.getAllTests(),
+      sources: dbService.getAllSources(),
+      syncQueue: dbService.getSyncQueue(),
+      isOffline: dbService.getIsOffline(),
+    });
+
+    // Load remote sources in background
+    if (isAuthenticated) {
+      get().loadUserSources().catch(() => {});
+    }
+  },
+
+  // ─── Auth ─────────────────────────────────────────────────────────────────
+  currentUser: null,
+  isAuthenticated: false,
+  isGuestMode: false,
+
+  setGuestMode: (guest: boolean) => {
+    set({ isGuestMode: guest });
+  },
 
   login: async (emailOrPhone, password) => {
     if (isSupabaseConfigured()) {
-      // Real Supabase email auth
-      const cleanEmail = emailOrPhone.trim();
-      const isEmail = cleanEmail.includes('@');
+      const cleanInput = emailOrPhone.trim();
+      const isEmail = cleanInput.includes('@');
+
       let authResult;
       try {
         authResult = await supabase.auth.signInWithPassword({
-          email: isEmail ? cleanEmail.toLowerCase() : cleanEmail,
-          password: password || '',
+          email: isEmail ? cleanInput.toLowerCase() : cleanInput,
+          password,
         });
       } catch (networkErr: any) {
         throw new Error(
           networkErr?.message ||
-          'Network request failed. Please check your internet connection or use Field Mode.'
+          'Network error. Check your internet or use Field Mode (Offline).'
         );
       }
 
@@ -107,9 +184,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const sbUser = authResult?.data?.user;
-      if (!sbUser) throw new Error('Authentication failed');
+      if (!sbUser) throw new Error('Authentication failed. Please try again.');
 
-      // Fetch profile from supabase profiles table if it exists
+      // Fetch profile
       let profile: any = null;
       try {
         const { data } = await supabase
@@ -118,28 +195,24 @@ export const useAppStore = create<AppState>((set, get) => ({
           .eq('id', sbUser.id)
           .single();
         profile = data;
-      } catch {
-        // Fall back gracefully to metadata if table is not yet migrated
-      }
+      } catch {}
 
       const user: User = {
         id: sbUser.id,
         fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email || 'User',
-        email: sbUser.email || cleanEmail,
+        email: sbUser.email || cleanInput,
         phone: profile?.phone || sbUser.phone || undefined,
         createdAt: sbUser.created_at,
       };
 
-      dbService.setCurrentUser(user);
-      set({ currentUser: user, isAuthenticated: true, isOffline: false });
+      dbService.setCurrentUserSync(user);
+      set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: false });
 
-      // Fetch their test history from Supabase in background
-      try {
-        await get().loadUserSources();
-      } catch {}
+      // Load community data
+      try { await get().loadUserSources(); } catch {}
       return true;
     } else {
-      // Local-only mode when Supabase is not configured
+      // No Supabase configured — local offline login
       return get().loginOffline(emailOrPhone);
     }
   },
@@ -156,17 +229,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       email: cleanEmail,
       createdAt: new Date().toISOString(),
     };
-    dbService.setCurrentUser(user);
+    dbService.setCurrentUserSync(user);
     dbService.setOfflineMode(true);
-    set({ currentUser: user, isAuthenticated: true, isOffline: true });
+    set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: true });
     return true;
   },
 
   signUp: async (fullName, email, phone, password) => {
     if (isSupabaseConfigured()) {
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password: password || '',
+        email: email.toLowerCase(),
+        password,
         options: {
           data: { full_name: fullName, phone },
         },
@@ -176,75 +249,92 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!data.user) throw new Error('Sign-up failed. Please try again.');
 
       // Upsert profile record
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        full_name: fullName,
-        email,
-        phone,
-        created_at: new Date().toISOString(),
-      });
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          full_name: fullName,
+          email: email.toLowerCase(),
+          phone,
+          created_at: new Date().toISOString(),
+        });
+      } catch {}
 
       const user: User = {
         id: data.user.id,
         fullName,
-        email,
+        email: email.toLowerCase(),
         phone,
         createdAt: new Date().toISOString(),
       };
-      dbService.setCurrentUser(user);
-      set({ currentUser: user, isAuthenticated: true });
+      dbService.setCurrentUserSync(user);
+      set({ currentUser: user, isAuthenticated: true, isGuestMode: false });
       return true;
     } else {
       // Local-only sign-up
       const user: User = {
         id: `local-${Date.now()}`,
         fullName,
-        email,
+        email: email.toLowerCase(),
         phone,
         createdAt: new Date().toISOString(),
       };
-      dbService.setCurrentUser(user);
-      set({ currentUser: user, isAuthenticated: true });
+      dbService.setCurrentUserSync(user);
+      set({ currentUser: user, isAuthenticated: true, isGuestMode: false });
       return true;
     }
   },
 
+  forgotPassword: async (email: string) => {
+    if (!email.trim() || !email.includes('@')) {
+      throw new Error('Please enter a valid email address.');
+    }
+    if (!isSupabaseConfigured()) {
+      throw new Error('Password reset requires internet. Please try again online.');
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+      redirectTo: 'safesip://reset-password',
+    });
+    if (error) throw new Error(error.message);
+  },
+
   logout: async () => {
     if (isSupabaseConfigured()) {
-      await supabase.auth.signOut();
+      try { await supabase.auth.signOut(); } catch {}
     }
-    dbService.setCurrentUser(null);
+    dbService.setCurrentUserSync(null);
     set({
       currentUser: null,
       isAuthenticated: false,
+      isGuestMode: false,
       tests: [],
       sources: [],
+      syncQueue: [],
       connectedDevice: null,
       bleState: 'disconnected',
       lastCompletedTest: null,
     });
   },
 
-  // Bluetooth — start disconnected; no fake pre-connected devices
-  connectedDevice: bleService.getConnectedDevice(),
+  // ─── Bluetooth ─────────────────────────────────────────────────────────────
+  connectedDevice: null,
   discoveredDevices: [],
-  bleState: bleService.getConnectionState(),
+  bleState: 'disconnected',
 
   startBleScan: async () => {
-    // bleService manages its own state (permission_denied, bluetooth_off, etc.)
-    // subscribe to propagate state changes back to the store
+    // Block BT scan in guest mode
+    if (get().isGuestMode) return;
+
     const unsub = bleService.onConnectionStateChange(state => {
       set({ bleState: state });
     });
-
     await bleService.startScan(devices => {
       set({ discoveredDevices: devices });
     });
-
-    unsub(); // remove listener after scan completes
+    unsub();
   },
 
   connectBleDevice: async (deviceId: string) => {
+    if (get().isGuestMode) return;
     try {
       const device = await bleService.connectToDevice(deviceId);
       set({
@@ -262,14 +352,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   connectSimulatedDevice: () => {
+    if (get().isGuestMode) return;
     const simDevice: Device = {
-      id: 'sim-safesip-bottle-01',
-      name: 'SafeSip Smart Bottle (Simulator)',
+      id: 'sim-arduino-nano-01',
+      name: 'SafeSip Arduino Nano (Simulator)',
       macAddress: 'C8:F0:9E:A1:B2:C3',
       rssi: -45,
-      batteryLevel: 94,
+      batteryLevel: 0,
       isConnected: true,
-      firmwareVersion: 'ESP32 v2.4 (Sim)',
+      firmwareVersion: 'Arduino Nano v3 (Sim)',
     };
     set({
       connectedDevice: simDevice,
@@ -293,19 +384,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  // Live Testing
+  // ─── Live Testing ──────────────────────────────────────────────────────────
   isTesting: false,
   testProgress: 0,
   testStage: 'Ready to test',
   liveReading: defaultSensorReading,
   activeTestError: null,
-  lastCompletedTest: dbService.getLatestTest(),
+  lastCompletedTest: null,
 
   startLiveTest: onCompleteNavigate => {
+    // Block testing in guest mode
+    if (get().isGuestMode) {
+      set({ activeTestError: 'Guest mode: Please create an account to run water tests.' });
+      return;
+    }
+
     set({
       isTesting: true,
       testProgress: 0,
-      testStage: 'Initializing ESP32 chamber…',
+      testStage: 'Initializing Arduino Nano sensors…',
       activeTestError: null,
     });
 
@@ -321,27 +418,30 @@ export const useAppStore = create<AppState>((set, get) => ({
         const user = get().currentUser;
         const device = get().connectedDevice;
 
-        let testLat = 37.7749;
-        let testLng = -122.4194;
+        let testLat = 20.5937; // India center fallback
+        let testLng = 78.9629;
         try {
           const globalNav = (globalThis as any)?.navigator;
           if (globalNav?.geolocation) {
-            globalNav.geolocation.getCurrentPosition(
-              (pos: any) => {
-                if (pos?.coords) {
-                  testLat = pos.coords.latitude;
-                  testLng = pos.coords.longitude;
-                }
-              },
-              () => {},
-              { timeout: 3000 }
-            );
+            await new Promise<void>(resolve => {
+              globalNav.geolocation.getCurrentPosition(
+                (pos: any) => {
+                  if (pos?.coords) {
+                    testLat = pos.coords.latitude;
+                    testLng = pos.coords.longitude;
+                  }
+                  resolve();
+                },
+                () => resolve(),
+                { timeout: 4000, enableHighAccuracy: true }
+              );
+            });
           }
         } catch {}
 
         const newTest: WaterTest = {
           id: `test-${Date.now()}`,
-          deviceId: device?.id || 'HC-05-Sensor',
+          deviceId: device?.id || 'Arduino-Nano-HC05',
           userId: user?.id || 'anonymous',
           sourceName: 'SafeSip Field Sample',
           locationName: 'Current Location',
@@ -359,7 +459,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         dbService.saveTest(newTest);
 
-        // Push to Supabase if configured and online (instantly broadcasts to all users via Realtime)
+        // Push to Supabase if configured and online
         if (isSupabaseConfigured() && !get().isOffline) {
           try {
             await supabase.from('water_tests').insert([{
@@ -378,7 +478,6 @@ export const useAppStore = create<AppState>((set, get) => ({
               measured_at: newTest.timestamp,
             }]);
 
-            // Register/update as community water source so all connected users see the new point on heatmap
             await supabase.from('water_sources').insert([{
               name: newTest.sourceName || 'Field Water Point',
               location_name: newTest.locationName || 'Sample Location',
@@ -423,8 +522,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isTesting: false, testProgress: 0, testStage: 'Cancelled' });
   },
 
-  // Tests History
-  tests: dbService.getAllTests(),
+  // ─── Tests History ─────────────────────────────────────────────────────────
+  tests: [],
   historyFilter: 'ALL',
 
   saveTestResult: (notes, sourceName) => {
@@ -435,31 +534,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ tests: dbService.getAllTests() });
       return last;
     }
-    const fallback = dbService.getLatestTest()!;
-    return fallback;
+    return dbService.getLatestTest()!;
   },
 
   setHistoryFilter: filter => {
     set({ historyFilter: filter });
   },
 
-  // Map & Sources
-  sources: dbService.getAllSources(),
+  // ─── Map & Sources ─────────────────────────────────────────────────────────
+  sources: [],
   selectedSourceId: null,
   mapSearchQuery: '',
   mapStatusFilter: 'ALL',
 
-  setSelectedSourceId: id => {
-    set({ selectedSourceId: id });
-  },
-
-  setMapSearchQuery: query => {
-    set({ mapSearchQuery: query });
-  },
-
-  setMapStatusFilter: filter => {
-    set({ mapStatusFilter: filter });
-  },
+  setSelectedSourceId: id => set({ selectedSourceId: id }),
+  setMapSearchQuery: query => set({ mapSearchQuery: query }),
+  setMapStatusFilter: filter => set({ mapStatusFilter: filter }),
 
   loadUserSources: async () => {
     if (isSupabaseConfigured()) {
@@ -485,36 +575,25 @@ export const useAppStore = create<AppState>((set, get) => ({
           testCount: row.test_count || 0,
           description: row.description,
         }));
+        dbService.setSources(mapped);
         set({ sources: mapped });
         return;
       }
     }
-    // Fallback: use local db sources (community data from BLE tests)
     set({ sources: dbService.getAllSources() });
   },
 
   subscribeToRealtimeSources: () => {
-    if (!isSupabaseConfigured()) {
-      return () => {};
-    }
+    if (!isSupabaseConfigured()) return () => {};
 
     const channel = supabase
       .channel('public:community_sources_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'water_sources' },
-        () => {
-          // Instantly sync community heatmap data across all devices
-          get().loadUserSources();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'water_tests' },
-        () => {
-          get().loadUserSources();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'water_sources' }, () => {
+        get().loadUserSources();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'water_tests' }, () => {
+        get().loadUserSources();
+      })
       .subscribe();
 
     return () => {
@@ -522,9 +601,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
   },
 
-  // Offline & Sync
+  // ─── Offline & Sync ────────────────────────────────────────────────────────
   isOffline: false,
-  syncQueue: dbService.getSyncQueue(),
+  syncQueue: [],
   isSyncing: false,
 
   setOfflineMode: offline => {
@@ -542,10 +621,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  // Active Navigation Tab
+  // ─── Navigation Tab ────────────────────────────────────────────────────────
   activeTab: 'home',
-  setActiveTab: tab => {
-    set({ activeTab: tab });
-  },
+  setActiveTab: tab => set({ activeTab: tab }),
 }));
-
