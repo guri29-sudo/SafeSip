@@ -32,6 +32,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const {
     currentUser,
+    isGuestMode,
     connectedDevice,
     bleState,
     lastCompletedTest,
@@ -98,10 +99,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         >
           <View>
             <Text style={styles.greetingTitle}>
-              Hi, {currentUser?.fullName || 'there'} 👋
+              Hi, {isGuestMode ? 'Guest' : (currentUser?.fullName || 'there')} 👋
             </Text>
             <Text style={styles.greetingSubtitle}>
-              {bleState === 'connected'
+              {isGuestMode
+                ? 'Guest Mode (View Only) • Browse Safe Drinking Water'
+                : bleState === 'connected'
                 ? 'Bottle connected • Ready for drinking test'
                 : 'No bottle connected • Tap to pair'}
             </Text>
@@ -115,7 +118,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           >
             <View style={styles.avatarCircle}>
               <Text style={styles.avatarInitial}>
-                {currentUser?.fullName ? currentUser.fullName[0].toUpperCase() : '?'}
+                {isGuestMode
+                  ? 'G'
+                  : currentUser?.fullName
+                  ? currentUser.fullName[0].toUpperCase()
+                  : '?'}
               </Text>
             </View>
           </TouchableOpacity>

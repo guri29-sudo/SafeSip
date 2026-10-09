@@ -7,7 +7,7 @@ import {
   SensorReading,
   SyncQueueItem,
 } from '../types';
-import { dbService } from '../database/storageService';
+import { dbService, RegisteredAccount } from '../database/storageService';
 import { bleService, BleConnectionState } from '../bluetooth/BleService';
 import { syncWorker } from '../api/syncWorker';
 import { supabase, isSupabaseConfigured } from '../api/supabaseClient';
@@ -22,7 +22,6 @@ interface AppState {
   isAuthenticated: boolean;
   isGuestMode: boolean;
   login: (emailOrPhone: string, password: string) => Promise<boolean>;
-  loginOffline: (name?: string) => Promise<boolean>;
   signUp: (fullName: string, email: string, phone: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
@@ -162,126 +161,187 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   login: async (emailOrPhone, password) => {
-    if (isSupabaseConfigured()) {
-      const cleanInput = emailOrPhone.trim();
-      const isEmail = cleanInput.includes('@');
+    const cleanInput = emailOrPhone.trim();
+    if (!cleanInput) {
+      throw new Error('Please enter your registered email address or phone number.');
+    }
+    if (!password) {
+      throw new Error('Password is required.');
+    }
 
-      let authResult;
-      try {
-        authResult = await supabase.auth.signInWithPassword({
-          email: isEmail ? cleanInput.toLowerCase() : cleanInput,
-          password,
-        });
-      } catch (networkErr: any) {
-        throw new Error(
-          networkErr?.message ||
-          'Network error. Check your internet or use Field Mode (Offline).'
-        );
+    // 1. Check local registered accounts
+    const localAccount = dbService.findAccountByEmailOrPhone(cleanInput);
+    if (localAccount) {
+      if (localAccount.password !== password) {
+        throw new Error('Incorrect password. Please try again.');
       }
-
-      if (authResult?.error) {
-        throw new Error(authResult.error.message);
-      }
-
-      const sbUser = authResult?.data?.user;
-      if (!sbUser) throw new Error('Authentication failed. Please try again.');
-
-      // Fetch profile
-      let profile: any = null;
-      try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', sbUser.id)
-          .single();
-        profile = data;
-      } catch {}
 
       const user: User = {
-        id: sbUser.id,
-        fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email || 'User',
-        email: sbUser.email || cleanInput,
-        phone: profile?.phone || sbUser.phone || undefined,
-        createdAt: sbUser.created_at,
+        id: localAccount.id,
+        fullName: localAccount.fullName,
+        email: localAccount.email,
+        phone: localAccount.phone,
+        createdAt: localAccount.createdAt,
       };
 
-      dbService.setCurrentUserSync(user);
-      set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: false });
+      // Sync Supabase session in background if online
+      if (isSupabaseConfigured() && !get().isOffline) {
+        supabase.auth.signInWithPassword({
+          email: localAccount.email,
+          password,
+        }).catch(() => {});
+      }
 
-      // Load community data
+      await dbService.setCurrentUser(user);
+      set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: false });
       try { await get().loadUserSources(); } catch {}
       return true;
-    } else {
-      // No Supabase configured — local offline login
-      return get().loginOffline(emailOrPhone);
     }
-  },
 
-  loginOffline: async (name?: string) => {
-    const displayName = (name && name.trim()) || 'SafeSip Field User';
-    const cleanEmail = displayName.includes('@')
-      ? displayName
-      : `${displayName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'field'}@safesip.local`;
+    // 2. If not found locally, check Supabase cloud (for cross-device logins)
+    if (isSupabaseConfigured() && !get().isOffline) {
+      const isEmail = cleanInput.includes('@');
+      if (isEmail) {
+        let authResult;
+        try {
+          authResult = await supabase.auth.signInWithPassword({
+            email: cleanInput.toLowerCase(),
+            password,
+          });
+        } catch (networkErr: any) {
+          throw new Error(
+            networkErr?.message || 'Network error. Please check your internet connection.'
+          );
+        }
 
-    const user: User = {
-      id: `local-${Date.now()}`,
-      fullName: displayName.includes('@') ? displayName.split('@')[0] : displayName,
-      email: cleanEmail,
-      createdAt: new Date().toISOString(),
-    };
-    dbService.setCurrentUserSync(user);
-    dbService.setOfflineMode(true);
-    set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: true });
-    return true;
+        if (authResult?.error) {
+          if (
+            authResult.error.message.toLowerCase().includes('invalid login credentials') ||
+            authResult.error.status === 400
+          ) {
+            throw new Error('Invalid email or password. If you have not registered yet, please Sign Up first.');
+          }
+          throw new Error(authResult.error.message);
+        }
+
+        const sbUser = authResult?.data?.user;
+        if (!sbUser) {
+          throw new Error('Authentication failed. Please verify your credentials or register.');
+        }
+
+        let profile: any = null;
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', sbUser.id)
+            .single();
+          profile = data;
+        } catch {}
+
+        const user: User = {
+          id: sbUser.id,
+          fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email?.split('@')[0] || 'User',
+          email: sbUser.email || cleanInput.toLowerCase(),
+          phone: profile?.phone || sbUser.phone || undefined,
+          createdAt: sbUser.created_at,
+        };
+
+        // Cache into local registered accounts
+        dbService.saveRegisteredAccount({
+          id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          phone: user.phone || '',
+          password,
+          createdAt: user.createdAt,
+        });
+
+        await dbService.setCurrentUser(user);
+        set({ currentUser: user, isAuthenticated: true, isGuestMode: false, isOffline: false });
+        try { await get().loadUserSources(); } catch {}
+        return true;
+      }
+    }
+
+    // 3. Not registered anywhere
+    throw new Error(`No registered account found for "${cleanInput}". Please register first.`);
   },
 
   signUp: async (fullName, email, phone, password) => {
-    if (isSupabaseConfigured()) {
-      const { data, error } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
-        password,
-        options: {
-          data: { full_name: fullName, phone },
-        },
-      });
+    const cleanName = fullName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim();
 
-      if (error) throw new Error(error.message);
-      if (!data.user) throw new Error('Sign-up failed. Please try again.');
-
-      // Upsert profile record
-      try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          full_name: fullName,
-          email: email.toLowerCase(),
-          phone,
-          created_at: new Date().toISOString(),
-        });
-      } catch {}
-
-      const user: User = {
-        id: data.user.id,
-        fullName,
-        email: email.toLowerCase(),
-        phone,
-        createdAt: new Date().toISOString(),
-      };
-      dbService.setCurrentUserSync(user);
-      set({ currentUser: user, isAuthenticated: true, isGuestMode: false });
-      return true;
-    } else {
-      // Local-only sign-up
-      const user: User = {
-        id: `local-${Date.now()}`,
-        fullName,
-        email: email.toLowerCase(),
-        phone,
-        createdAt: new Date().toISOString(),
-      };
-      dbService.setCurrentUserSync(user);
-      set({ currentUser: user, isAuthenticated: true, isGuestMode: false });
-      return true;
+    if (!cleanName || !cleanEmail || !cleanPhone || !password) {
+      throw new Error('All registration fields are required.');
     }
+
+    // Check if account already registered
+    const existing = dbService.findAccountByEmailOrPhone(cleanEmail) || dbService.findAccountByEmailOrPhone(cleanPhone);
+    if (existing) {
+      throw new Error('An account with this email or phone is already registered. Please log in.');
+    }
+
+    let userId = `user-${Date.now()}`;
+
+    // Register with Supabase if online
+    if (isSupabaseConfigured() && !get().isOffline) {
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: {
+            data: { full_name: cleanName, phone: cleanPhone },
+          },
+        });
+
+        if (error) {
+          if (error.message.toLowerCase().includes('already registered')) {
+            throw new Error('An account with this email is already registered. Please log in.');
+          }
+          console.warn('[Supabase SignUp]', error.message);
+        } else if (data?.user?.id) {
+          userId = data.user.id;
+          try {
+            await supabase.from('profiles').upsert({
+              id: userId,
+              full_name: cleanName,
+              email: cleanEmail,
+              phone: cleanPhone,
+              created_at: new Date().toISOString(),
+            });
+          } catch {}
+        }
+      } catch (sbErr: any) {
+        if (sbErr.message?.includes('already registered')) {
+          throw sbErr;
+        }
+        console.warn('[Supabase SignUp Error]', sbErr);
+      }
+    }
+
+    // Save registered account permanently in local DB
+    const newAccount: RegisteredAccount = {
+      id: userId,
+      fullName: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      password,
+      createdAt: new Date().toISOString(),
+    };
+    dbService.saveRegisteredAccount(newAccount);
+
+    const user: User = {
+      id: userId,
+      fullName: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      createdAt: newAccount.createdAt,
+    };
+    await dbService.setCurrentUser(user);
+    set({ currentUser: user, isAuthenticated: true, isGuestMode: false });
+    return true;
   },
 
   forgotPassword: async (email: string) => {

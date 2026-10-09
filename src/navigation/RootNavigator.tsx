@@ -39,6 +39,8 @@ export const RootNavigator: React.FC = () => {
   const {
     currentUser,
     isAuthenticated,
+    isGuestMode: storeGuestMode,
+    setGuestMode,
     logout,
     activeTab,
     setActiveTab,
@@ -52,6 +54,7 @@ export const RootNavigator: React.FC = () => {
 
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('splash');
   const [isGuestMode, setIsGuestMode] = useState(false);
+  const activeGuest = isGuestMode || storeGuestMode || (!isAuthenticated && !currentUser);
   const [selectedSource, setSelectedSource] = useState<WaterSource | null>(null);
   const [activeTestResult, setActiveTestResult] = useState<WaterTest | null>(null);
 
@@ -73,17 +76,45 @@ export const RootNavigator: React.FC = () => {
       <ScrollView contentContainerStyle={styles.profileContainer}>
         {/* User Card */}
         <View style={styles.profileCard}>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarInitial}>
-              {currentUser?.fullName ? currentUser.fullName[0] : 'V'}
+          <View style={[styles.avatarCircle, activeGuest && { backgroundColor: colors.surfaceSecondary }]}>
+            <Text style={[styles.avatarInitial, activeGuest && { color: colors.textSecondary }]}>
+              {activeGuest ? 'G' : currentUser?.fullName ? currentUser.fullName[0].toUpperCase() : 'U'}
             </Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{currentUser?.fullName || 'Vedant'}</Text>
-            <Text style={styles.userEmail}>{currentUser?.email || 'vedant@safesip.org'}</Text>
-            <Text style={styles.userPhone}>{currentUser?.phone || '+1 (555) 382-9901'}</Text>
+            <Text style={styles.userName}>
+              {activeGuest ? 'Guest User' : currentUser?.fullName || 'User'}
+            </Text>
+            <Text style={styles.userEmail}>
+              {activeGuest ? 'Guest (View Only Mode)' : currentUser?.email || 'No email provided'}
+            </Text>
+            <Text style={styles.userPhone}>
+              {activeGuest ? 'Registration required to test' : currentUser?.phone || 'No phone registered'}
+            </Text>
           </View>
         </View>
+
+        {activeGuest && (
+          <View style={styles.guestBanner}>
+            <Icon name="shield-check" size={18} color={colors.primary} />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.guestBannerTitle}>Browsing as Guest</Text>
+              <Text style={styles.guestBannerText}>
+                Sign in or register with your email and phone to run drinking water tests and save findings.
+              </Text>
+            </View>
+            <Button
+              title="Sign In"
+              size="sm"
+              onPress={() => {
+                setIsGuestMode(false);
+                setGuestMode(false);
+                navigateTo('login');
+              }}
+              fullWidth={false}
+            />
+          </View>
+        )}
 
         {/* Device Settings Card */}
         <Text style={styles.sectionHeading}>Hardware Configuration</Text>
@@ -161,13 +192,15 @@ export const RootNavigator: React.FC = () => {
           </View>
         </View>
 
-        {/* Sign Out */}
+        {/* Sign Out / Exit Guest */}
         <Button
-          title="Sign Out"
+          title={activeGuest ? 'Exit Guest Mode' : 'Sign Out'}
           variant="secondary"
           size="md"
           onPress={() => {
             logout();
+            setIsGuestMode(false);
+            setGuestMode(false);
             navigateTo('login');
           }}
           style={{ marginTop: 20 }}
@@ -197,6 +230,7 @@ export const RootNavigator: React.FC = () => {
             onLoginPress={() => navigateTo('login')}
             onGuestMode={() => {
               setIsGuestMode(true);
+              setGuestMode(true);
               navigateTo('main');
             }}
           />
@@ -205,7 +239,11 @@ export const RootNavigator: React.FC = () => {
       case 'signup':
         return (
           <SignUpScreen
-            onSuccess={() => navigateTo('main')}
+            onSuccess={() => {
+              setIsGuestMode(false);
+              setGuestMode(false);
+              navigateTo('main');
+            }}
             onNavigateToLogin={() => navigateTo('login')}
           />
         );
@@ -215,11 +253,13 @@ export const RootNavigator: React.FC = () => {
           <LoginScreen
             onSuccess={() => {
               setIsGuestMode(false);
+              setGuestMode(false);
               navigateTo('main');
             }}
             onNavigateToSignUp={() => navigateTo('signup')}
             onGuestMode={() => {
               setIsGuestMode(true);
+              setGuestMode(true);
               navigateTo('main');
             }}
           />
@@ -450,5 +490,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  guestBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: 14,
+    marginBottom: 20,
+  },
+  guestBannerTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  guestBannerText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginRight: 6,
   },
 });

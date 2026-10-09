@@ -7,12 +7,22 @@ import { WaterTest, WaterSource, SyncQueueItem, User } from '../types';
  * In-memory cache is used for synchronous reads after initial load.
  */
 
+export interface RegisteredAccount {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  password: string;
+  createdAt: string;
+}
+
 const STORAGE_KEYS = {
   TESTS: '@safesip/tests',
   SOURCES: '@safesip/sources',
   SYNC_QUEUE: '@safesip/sync_queue',
   CURRENT_USER: '@safesip/current_user',
   IS_OFFLINE: '@safesip/is_offline',
+  REGISTERED_ACCOUNTS: '@safesip/registered_accounts',
 };
 
 class SafeSipDatabaseService {
@@ -20,6 +30,7 @@ class SafeSipDatabaseService {
   private sources: WaterSource[] = [];
   private syncQueue: SyncQueueItem[] = [];
   private currentUser: User | null = null;
+  private registeredAccounts: RegisteredAccount[] = [];
   private isOffline: boolean = false;
   private loaded: boolean = false;
 
@@ -27,12 +38,13 @@ class SafeSipDatabaseService {
   public async load(): Promise<void> {
     if (this.loaded) return;
     try {
-      const [testsRaw, sourcesRaw, queueRaw, userRaw, offlineRaw] = await Promise.all([
+      const [testsRaw, sourcesRaw, queueRaw, userRaw, offlineRaw, accountsRaw] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.TESTS),
         AsyncStorage.getItem(STORAGE_KEYS.SOURCES),
         AsyncStorage.getItem(STORAGE_KEYS.SYNC_QUEUE),
         AsyncStorage.getItem(STORAGE_KEYS.CURRENT_USER),
         AsyncStorage.getItem(STORAGE_KEYS.IS_OFFLINE),
+        AsyncStorage.getItem(STORAGE_KEYS.REGISTERED_ACCOUNTS),
       ]);
 
       this.tests = testsRaw ? JSON.parse(testsRaw) : [];
@@ -40,6 +52,7 @@ class SafeSipDatabaseService {
       this.syncQueue = queueRaw ? JSON.parse(queueRaw) : [];
       this.currentUser = userRaw ? JSON.parse(userRaw) : null;
       this.isOffline = offlineRaw === 'true';
+      this.registeredAccounts = accountsRaw ? JSON.parse(accountsRaw) : [];
       this.loaded = true;
     } catch (err) {
       console.warn('[SafeSip DB] Failed to load persisted data:', err);
@@ -55,6 +68,9 @@ class SafeSipDatabaseService {
   }
   private async persistSyncQueue() {
     try { await AsyncStorage.setItem(STORAGE_KEYS.SYNC_QUEUE, JSON.stringify(this.syncQueue)); } catch {}
+  }
+  private async persistRegisteredAccounts() {
+    try { await AsyncStorage.setItem(STORAGE_KEYS.REGISTERED_ACCOUNTS, JSON.stringify(this.registeredAccounts)); } catch {}
   }
 
   // ─── Tests CRUD ───────────────────────────────────────────────────────────
@@ -188,6 +204,61 @@ class SafeSipDatabaseService {
     } else {
       AsyncStorage.removeItem(STORAGE_KEYS.CURRENT_USER).catch(() => {});
     }
+  }
+
+  // ─── Registered Accounts Management ───────────────────────────────────────
+
+  public getRegisteredAccounts(): RegisteredAccount[] {
+    return [...this.registeredAccounts];
+  }
+
+  public saveRegisteredAccount(account: RegisteredAccount): void {
+    const existingIndex = this.registeredAccounts.findIndex(
+      a =>
+        a.email.toLowerCase() === account.email.toLowerCase() ||
+        a.phone === account.phone
+    );
+    if (existingIndex >= 0) {
+      this.registeredAccounts[existingIndex] = account;
+    } else {
+      this.registeredAccounts.push(account);
+    }
+    this.persistRegisteredAccounts();
+  }
+
+  public findAccountByEmailOrPhone(identifier: string): RegisteredAccount | undefined {
+    const clean = identifier.trim().toLowerCase();
+    const digits = identifier.replace(/\D/g, '');
+
+    return this.registeredAccounts.find(acc => {
+      const emailMatches = acc.email.toLowerCase() === clean;
+      const phoneClean = acc.phone.replace(/\D/g, '');
+      const phoneMatches =
+        acc.phone.trim() === identifier.trim() ||
+        (digits.length >= 7 && phoneClean.endsWith(digits.slice(-10))) ||
+        (digits.length >= 7 && digits.endsWith(phoneClean.slice(-10)));
+      return emailMatches || phoneMatches;
+    });
+  }
+
+  public verifyCredentials(
+    identifier: string,
+    passwordAttempt: string
+  ): { success: boolean; account?: RegisteredAccount; error?: string } {
+    const account = this.findAccountByEmailOrPhone(identifier);
+    if (!account) {
+      return {
+        success: false,
+        error: `No registered account found for "${identifier}". Please register first.`,
+      };
+    }
+    if (account.password !== passwordAttempt) {
+      return {
+        success: false,
+        error: 'Incorrect password. Please try again.',
+      };
+    }
+    return { success: true, account };
   }
 }
 
