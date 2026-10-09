@@ -32,8 +32,14 @@ export const ConnectDeviceScreen: React.FC<ConnectDeviceScreenProps> = ({ onBack
     bleState,
     startBleScan,
     connectBleDevice,
+    connectSimulatedDevice,
     disconnectBleDevice,
   } = useAppStore();
+
+  const handleConnectSimulator = () => {
+    connectSimulatedDevice();
+    onBack();
+  };
 
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [hasScannedOnce, setHasScannedOnce] = useState(false);
@@ -325,6 +331,14 @@ export const ConnectDeviceScreen: React.FC<ConnectDeviceScreenProps> = ({ onBack
           size="md"
           icon="refresh-cw"
           style={{ marginTop: 8 }}
+        />
+        {/* ── Simulator Button (testing without real HC-05) ─────────────── */}
+        <Button
+          title="🧪 Connect Simulator (No Real Hardware)"
+          variant="secondary"
+          onPress={handleConnectSimulator}
+          size="md"
+          style={{ marginTop: 10, opacity: 0.85 }}
         />
       </ScrollView>
     </SafeAreaView>

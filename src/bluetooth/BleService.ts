@@ -203,48 +203,65 @@ class SafeSipBluetoothService {
         return () => {};
       }
 
-      // Get already-paired devices first (HC-05 should be paired already)
+      // Get all bonded/paired Classic Bluetooth devices
       const pairedDevices: any[] = await RNBluetoothClassic.getBondedDevices();
-      const safeSipPaired = pairedDevices.filter(
-        (d: any) =>
-          d.name?.includes('HC-05') ||
-          d.name?.includes('SafeSip') ||
-          d.name?.includes('HC05')
-      );
+      
+      // Sort so HC-05 / SafeSip / ESP32 devices appear first
+      const sortedPaired = [...pairedDevices].sort((a: any, b: any) => {
+        const aName = (a.name || '').toLowerCase();
+        const bName = (b.name || '').toLowerCase();
+        const isASafeSip = aName.includes('safesip') || aName.includes('hc-05') || aName.includes('hc05') || aName.includes('esp32');
+        const isBSafeSip = bName.includes('safesip') || bName.includes('hc-05') || bName.includes('hc05') || bName.includes('esp32');
+        if (isASafeSip && !isBSafeSip) return -1;
+        if (!isASafeSip && isBSafeSip) return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
 
-      if (safeSipPaired.length > 0) {
-        const mapped: Device[] = safeSipPaired.map((d: any) => ({
-          id: d.address,
-          name: d.name || 'HC-05',
-          macAddress: d.address,
-          rssi: d.rssi ?? -70,
-          batteryLevel: 0,
-          isConnected: false,
-          firmwareVersion: 'HC-05',
-        }));
+      if (sortedPaired.length > 0) {
+        const mapped: Device[] = sortedPaired.map((d: any) => {
+          const dName = d.name || 'Bluetooth Device';
+          const isKnown = dName.toLowerCase().includes('safesip') ||
+            dName.toLowerCase().includes('hc-05') ||
+            dName.toLowerCase().includes('hc05') ||
+            dName.toLowerCase().includes('esp32');
+          return {
+            id: d.address,
+            name: dName,
+            macAddress: d.address,
+            rssi: d.rssi ?? -65,
+            batteryLevel: 0,
+            isConnected: false,
+            firmwareVersion: isKnown ? 'SafeSip HC-05' : 'Classic BT',
+          };
+        });
         onUpdate(mapped);
         this.notifyStateChange('disconnected');
         return () => {};
       }
 
-      // If no paired HC-05 found, start a discovery scan (finds nearby devices)
-      await RNBluetoothClassic.startDiscovery();
-      const discovered: any[] = await RNBluetoothClassic.cancelDiscovery(); // returns results
-
-      const all: Device[] = [...pairedDevices, ...discovered].map((d: any) => ({
-        id: d.address,
-        name: d.name || 'Unknown Device',
-        macAddress: d.address,
-        rssi: d.rssi ?? -80,
-        batteryLevel: 0,
-        isConnected: false,
-        firmwareVersion: 'Classic BT',
-      }));
-
-      onUpdate(all);
+      // If no paired devices, try discovery
+      try {
+        const discovered = await RNBluetoothClassic.startDiscovery();
+        const mappedDiscovered: Device[] = (discovered || []).map((d: any) => ({
+          id: d.address,
+          name: d.name || 'Nearby Device',
+          macAddress: d.address,
+          rssi: d.rssi ?? -80,
+          batteryLevel: 0,
+          isConnected: false,
+          firmwareVersion: 'Discovered BT',
+        }));
+        onUpdate(mappedDiscovered);
+      } catch {
+        onUpdate([]);
+      }
     } catch (err: any) {
       console.error('[SafeSip BT] Scan error:', err);
-      Alert.alert('Scan Failed', `Bluetooth scan error: ${err?.message || 'Unknown error'}`);
+      Alert.alert(
+        'Bluetooth Notice',
+        'Could not scan paired devices: ' + (err?.message || 'Check Bluetooth settings') +
+        '\n\nPlease make sure your HC-05 is paired in Android Settings > Bluetooth (PIN: 1234).'
+      );
       onUpdate([]);
     }
 

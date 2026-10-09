@@ -1,5 +1,17 @@
+import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config/env';
+
+/**
+ * In-memory fallback storage for React Native when AsyncStorage is not linked.
+ * Prevents "localStorage is not available" crashes.
+ */
+const memoryStorage = {
+  data: {} as Record<string, string>,
+  getItem: (key: string) => memoryStorage.data[key] ?? null,
+  setItem: (key: string, value: string) => { memoryStorage.data[key] = value; },
+  removeItem: (key: string) => { delete memoryStorage.data[key]; },
+};
 
 /**
  * Supabase client configuration.
@@ -10,6 +22,7 @@ const safeKey = SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 export const supabase = createClient(safeUrl, safeKey, {
   auth: {
+    storage: memoryStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,

@@ -25,7 +25,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onSuccess,
   onNavigateToSignUp,
 }) => {
-  const { login } = useAppStore();
+  const { login, loginOffline } = useAppStore();
 
   const [emailOrPhone, setEmailOrPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -53,8 +53,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     try {
       await login(emailOrPhone, password);
       onSuccess();
-    } catch {
-      setErrors({ form: 'Invalid credentials. Please verify and try again.' });
+    } catch (err: any) {
+      setErrors({
+        form: err?.message || 'Invalid credentials. Please verify and try again.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFieldMode = async () => {
+    setLoading(true);
+    try {
+      await loginOffline(emailOrPhone.trim() || 'Field Operator');
+      onSuccess();
     } finally {
       setLoading(false);
     }
@@ -71,7 +83,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const handleOAuth = (provider: 'Google' | 'Apple') => {
     setLoading(true);
     setTimeout(async () => {
-      await login(`vedant@${provider.toLowerCase()}.com`, 'oauth-token');
+      await loginOffline(`user@${provider.toLowerCase()}.com`);
       setLoading(false);
       onSuccess();
     }, 500);
@@ -141,6 +153,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               loading={loading}
               size="lg"
               style={{ marginTop: 8 }}
+            />
+            <Button
+              title="🌐 Field Mode (No Internet)"
+              variant="secondary"
+              onPress={handleFieldMode}
+              loading={loading}
+              size="lg"
+              style={{ marginTop: 10 }}
             />
           </View>
 

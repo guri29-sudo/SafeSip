@@ -26,7 +26,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install JS Dependencies
@@ -68,7 +68,10 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode=none
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
+          ANDROID_HOME: /usr/local/lib/android/sdk
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
@@ -102,7 +105,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install JS Dependencies
@@ -126,13 +129,10 @@ jobs:
           restore-keys: cocoapods-${{ runner.os }}-
 
       - name: Install CocoaPods
-        if: steps.cocoapods-cache.outputs.cache-hit != 'true'
         working-directory: ios
         run: |
-          # Update pod repo before install to avoid stale spec errors
-          pod repo update --silent
-          pod install --verbose
-        timeout-minutes: 20     # ← Kill pod install if it hangs
+          pod install
+        timeout-minutes: 15
 
       - name: Inject Supabase Secrets
         env:
@@ -159,6 +159,7 @@ jobs:
       - name: Build iOS (arm64, no code signing)
         working-directory: ios
         run: |
+          set -o pipefail
           xcodebuild \
             -workspace SafeSip.xcworkspace \
             -scheme SafeSip \
@@ -171,24 +172,22 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
             SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO \
-            -allowProvisioningUpdates 2>&1 | xcpretty || xcodebuild \
-            -workspace SafeSip.xcworkspace \
-            -scheme SafeSip \
-            -configuration Debug \
-            -sdk iphoneos \
-            -arch arm64 \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO
-        timeout-minutes: 25     # ← Kill xcodebuild if it hangs
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+        timeout-minutes: 25
 
       - name: Package IPA
         working-directory: ios
         run: |
           mkdir -p Payload
-          cp -r build/Build/Products/Debug-iphoneos/SafeSip.app Payload/
+          APP_PATH=$(find build/Build/Products -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: No .app file found in build products!"
+            find build -maxdepth 4 -ls
+            exit 1
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/SafeSip.app
           zip -r SafeSip-Debug.ipa Payload
 
       - name: Upload iOS IPA
