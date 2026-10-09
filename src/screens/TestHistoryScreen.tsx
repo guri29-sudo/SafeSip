@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   Modal,
   Alert,
   Share,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { Header } from '../components/Header';
@@ -80,7 +80,7 @@ export const TestHistoryScreen: React.FC<TestHistoryScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <Header
         title="Test History"
         subtitle={`${filtered.length} tests recorded`}

@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
+  Animated,
+  StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { StatusBadge } from '../components/StatusBadge';
@@ -37,18 +39,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     syncQueue,
     triggerSync,
     isSyncing,
+    sources,
   } = useAppStore();
 
-  const currentReading = lastCompletedTest || {
-    pH: 7.4,
-    tds: 125,
-    conductivity: 310,
-    turbidity: 0.8,
-    temperature: 22.5,
-    safetyStatus: 'SAFE' as const,
-    locationName: 'Lake View Reservoir',
-    timestamp: new Date().toISOString(),
-  };
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
+  const hasTest = lastCompletedTest !== null;
 
   const formatLastTestedTime = (isoString?: string) => {
     if (!isoString) return 'Just now';
@@ -60,8 +73,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     }
   };
 
+  const nearbySources = sources.length;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" />
       <OfflineBanner
         isOffline={isOffline}
         pendingCount={syncQueue.length}
@@ -74,13 +90,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         showsVerticalScrollIndicator={false}
       >
         {/* Top Header: Greeting & Profile */}
-        <View style={styles.headerRow}>
+        <Animated.View
+          style={[
+            styles.headerRow,
+            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+          ]}
+        >
           <View>
             <Text style={styles.greetingTitle}>
-              Hi, {currentUser?.fullName || 'Vedant'} 👋
+              Hi, {currentUser?.fullName || 'there'} 👋
             </Text>
             <Text style={styles.greetingSubtitle}>
-              Bottle connected • Ready for drinking test
+              {bleState === 'connected'
+                ? 'Bottle connected • Ready for drinking test'
+                : 'No bottle connected • Tap to pair'}
             </Text>
           </View>
 
@@ -92,76 +115,118 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           >
             <View style={styles.avatarCircle}>
               <Text style={styles.avatarInitial}>
-                {currentUser?.fullName ? currentUser.fullName[0] : 'V'}
+                {currentUser?.fullName ? currentUser.fullName[0].toUpperCase() : '?'}
               </Text>
             </View>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         {/* Hardware Pairing Status Pill */}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={onNavigateToConnect}
-          style={styles.deviceStatusPill}
-        >
-          <View style={styles.deviceLeft}>
-            <View
-              style={[
-                styles.deviceStatusDot,
-                {
-                  backgroundColor:
-                    bleState === 'connected' ? colors.safe : colors.caution,
-                },
-              ]}
-            />
-            <Icon name="bluetooth" size={14} color={colors.textSecondary} />
-            <Text style={styles.deviceName}>
-              {connectedDevice ? connectedDevice.name : 'No bottle paired'}
-            </Text>
-          </View>
+        <Animated.View style={{ opacity: fadeAnim }}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={onNavigateToConnect}
+            style={styles.deviceStatusPill}
+          >
+            <View style={styles.deviceLeft}>
+              <View
+                style={[
+                  styles.deviceStatusDot,
+                  {
+                    backgroundColor:
+                      bleState === 'connected' ? colors.safe : colors.caution,
+                  },
+                ]}
+              />
+              <Icon name="bluetooth" size={14} color={colors.textSecondary} />
+              <Text style={styles.deviceName}>
+                {connectedDevice ? connectedDevice.name : 'No bottle paired'}
+              </Text>
+            </View>
 
-          <View style={styles.deviceRight}>
-            {connectedDevice ? (
-              <View style={styles.batteryRow}>
-                <Icon name="battery" size={14} color={colors.textSecondary} />
-                <Text style={styles.batteryText}>{connectedDevice.batteryLevel}%</Text>
-              </View>
-            ) : (
-              <Text style={styles.pairText}>Pair Bottle</Text>
-            )}
-            <Icon name="chevron-right" size={14} color={colors.textMuted} />
-          </View>
-        </TouchableOpacity>
+            <View style={styles.deviceRight}>
+              {connectedDevice ? (
+                <View style={styles.batteryRow}>
+                  <Icon name="battery" size={14} color={colors.textSecondary} />
+                  <Text style={styles.batteryText}>{connectedDevice.batteryLevel}%</Text>
+                </View>
+              ) : (
+                <Text style={styles.pairText}>Pair Bottle</Text>
+              )}
+              <Icon name="chevron-right" size={14} color={colors.textMuted} />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
 
         {/* Main Status Hero Card */}
-        <View style={styles.mainStatusCard}>
-          <View style={styles.statusTopRow}>
-            <View style={styles.statusLabelGroup}>
-              <Text style={styles.statusOverline}>LAST TEST CLASSIFICATION</Text>
-              <Text style={styles.statusVerdict}>SAFE</Text>
+        {hasTest ? (
+          <Animated.View
+            style={[
+              styles.mainStatusCard,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+            ]}
+          >
+            <View style={styles.statusTopRow}>
+              <View style={styles.statusLabelGroup}>
+                <Text style={styles.statusOverline}>LAST TEST CLASSIFICATION</Text>
+                <Text
+                  style={[
+                    styles.statusVerdict,
+                    {
+                      color:
+                        lastCompletedTest.safetyStatus === 'SAFE'
+                          ? colors.safe
+                          : lastCompletedTest.safetyStatus === 'CAUTION'
+                          ? colors.caution
+                          : colors.unsafe,
+                    },
+                  ]}
+                >
+                  {lastCompletedTest.safetyStatus}
+                </Text>
+              </View>
+              <StatusBadge status={lastCompletedTest.safetyStatus} size="lg" />
             </View>
-            <StatusBadge status="SAFE" size="lg" />
-          </View>
 
-          <Text style={styles.statusDescription}>Good quality for drinking</Text>
+            <Text style={styles.statusDescription}>
+              {lastCompletedTest.safetyStatus === 'SAFE'
+                ? 'Good quality for drinking'
+                : lastCompletedTest.safetyStatus === 'CAUTION'
+                ? 'Use with caution — some parameters elevated'
+                : 'Do not drink — unsafe parameters detected'}
+            </Text>
 
-          <View style={styles.statusDivider} />
+            <View style={styles.statusDivider} />
 
-          <View style={styles.statusMetaRow}>
-            <View style={styles.metaCol}>
-              <Text style={styles.metaLabel}>Sample Location</Text>
-              <Text style={styles.metaValue} numberOfLines={1}>
-                {currentReading.locationName || 'Lake View Reservoir'}
-              </Text>
+            <View style={styles.statusMetaRow}>
+              <View style={styles.metaCol}>
+                <Text style={styles.metaLabel}>Sample Location</Text>
+                <Text style={styles.metaValue} numberOfLines={1}>
+                  {lastCompletedTest.locationName || lastCompletedTest.sourceName || 'Unknown'}
+                </Text>
+              </View>
+              <View style={styles.metaColRight}>
+                <Text style={styles.metaLabel}>Tested At</Text>
+                <Text style={styles.metaValue}>
+                  {formatLastTestedTime(lastCompletedTest.timestamp)}
+                </Text>
+              </View>
             </View>
-            <View style={styles.metaColRight}>
-              <Text style={styles.metaLabel}>Tested At</Text>
-              <Text style={styles.metaValue}>
-                {formatLastTestedTime(currentReading.timestamp)}
-              </Text>
-            </View>
-          </View>
-        </View>
+          </Animated.View>
+        ) : (
+          <Animated.View
+            style={[
+              styles.emptyStateCard,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+            ]}
+          >
+            <Icon name="droplet" size={32} color={colors.primary} />
+            <Text style={styles.emptyStateTitle}>No tests yet</Text>
+            <Text style={styles.emptyStateSub}>
+              Connect your SafeSip bottle and run your first water quality test
+            </Text>
+          </Animated.View>
+        )}
 
         {/* Primary CTA Button: Test Water */}
         <View style={styles.ctaContainer}>
@@ -173,42 +238,43 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           />
         </View>
 
-        {/* Parameters Section */}
-        <View style={styles.parametersSection}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Physicochemical Parameters</Text>
-            <TouchableOpacity onPress={onNavigateToHistory}>
-              <Text style={styles.historyLink}>History</Text>
-            </TouchableOpacity>
-          </View>
+        {/* Parameters Section — only shown after a real test */}
+        {hasTest && (
+          <Animated.View style={[styles.parametersSection, { opacity: fadeAnim }]}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Physicochemical Parameters</Text>
+              <TouchableOpacity onPress={onNavigateToHistory}>
+                <Text style={styles.historyLink}>History</Text>
+              </TouchableOpacity>
+            </View>
 
-          {/* 5 Parameters in a clean hierarchy */}
-          <ParameterCard
-            paramKey="pH"
-            value={currentReading.pH}
-            highlightStatus="SAFE"
-          />
-          <ParameterCard
-            paramKey="tds"
-            value={currentReading.tds}
-            highlightStatus="SAFE"
-          />
-          <ParameterCard
-            paramKey="conductivity"
-            value={currentReading.conductivity}
-            highlightStatus="SAFE"
-          />
-          <ParameterCard
-            paramKey="turbidity"
-            value={currentReading.turbidity}
-            highlightStatus="SAFE"
-          />
-          <ParameterCard
-            paramKey="temperature"
-            value={currentReading.temperature}
-            highlightStatus="SAFE"
-          />
-        </View>
+            <ParameterCard
+              paramKey="pH"
+              value={lastCompletedTest!.pH}
+              highlightStatus={lastCompletedTest!.safetyStatus}
+            />
+            <ParameterCard
+              paramKey="tds"
+              value={lastCompletedTest!.tds}
+              highlightStatus={lastCompletedTest!.safetyStatus}
+            />
+            <ParameterCard
+              paramKey="conductivity"
+              value={lastCompletedTest!.conductivity}
+              highlightStatus={lastCompletedTest!.safetyStatus}
+            />
+            <ParameterCard
+              paramKey="turbidity"
+              value={lastCompletedTest!.turbidity}
+              highlightStatus={lastCompletedTest!.safetyStatus}
+            />
+            <ParameterCard
+              paramKey="temperature"
+              value={lastCompletedTest!.temperature}
+              highlightStatus={lastCompletedTest!.safetyStatus}
+            />
+          </Animated.View>
+        )}
 
         {/* Quick Map Community Teaser */}
         <TouchableOpacity
@@ -220,9 +286,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <Icon name="map-pin" size={20} color={colors.primary} />
           </View>
           <View style={styles.teaserContent}>
-            <Text style={styles.teaserTitle}>5 Community Sources Nearby</Text>
+            <Text style={styles.teaserTitle}>
+              {nearbySources > 0
+                ? `${nearbySources} Community Sources`
+                : 'Community Map'}
+            </Text>
             <Text style={styles.teaserSubtitle}>
-              Explore verified fresh springs and filtration spots
+              {nearbySources > 0
+                ? 'Explore verified water sources nearby'
+                : 'Add your test results to the community map'}
             </Text>
           </View>
           <Icon name="chevron-right" size={16} color={colors.textMuted} />
@@ -336,6 +408,29 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     ...shadows.card,
   },
+  emptyStateCard: {
+    backgroundColor: colors.surface,
+    padding: 32,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 16,
+    alignItems: 'center',
+    ...shadows.card,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyStateSub: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
   statusTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -354,7 +449,6 @@ const styles = StyleSheet.create({
   statusVerdict: {
     fontSize: 32,
     fontWeight: '800',
-    color: colors.safe,
     letterSpacing: -0.5,
     marginTop: 2,
   },

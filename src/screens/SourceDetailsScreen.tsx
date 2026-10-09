@@ -4,10 +4,10 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { Header } from '../components/Header';
 import { StatusBadge } from '../components/StatusBadge';
@@ -51,7 +51,7 @@ export const SourceDetailsScreen: React.FC<SourceDetailsScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <Header
         title={source.name}
         subtitle={source.locationName}

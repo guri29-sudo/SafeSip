@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, typography } from '../theme';
 import { Icon, IconName } from './Icon';
 
@@ -9,6 +10,7 @@ interface BottomNavBarProps {
 }
 
 export const BottomNavBar: React.FC<BottomNavBarProps> = ({ activeTab, onTabPress }) => {
+  const insets = useSafeAreaInsets();
   const tabs: { key: 'home' | 'map' | 'history' | 'profile'; label: string; icon: IconName }[] = [
     { key: 'home', label: 'Home', icon: 'home' },
     { key: 'map', label: 'Map', icon: 'map' },
@@ -17,7 +19,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ activeTab, onTabPres
   ];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: Math.max(8, insets.bottom), height: 56 + Math.max(8, insets.bottom) }]}>
       {tabs.map(tab => {
         const isActive = activeTab === tab.key;
         const color = isActive ? colors.primary : colors.textMuted;

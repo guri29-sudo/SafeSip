@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, SafeAreaView, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { BottomNavBar } from '../components/BottomNavBar';
@@ -60,7 +61,7 @@ export const RootNavigator: React.FC = () => {
 
   // Render Profile View for the Profile Bottom Tab
   const renderProfileTab = () => (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <Header title="Profile & Bottle Settings" />
       <OfflineBanner
         isOffline={isOffline}

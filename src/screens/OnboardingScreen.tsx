@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows, spacing } from '../theme';
 import { Button } from '../components/Button';
 import { Icon, IconName } from '../components/Icon';
@@ -22,7 +23,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
     {
       title: 'Test Water Quality',
       description:
-        'Instant multi-sensor analysis measuring pH, TDS, electrical conductivity, turbidity, and temperature via ESP32 BLE.',
+        'Instant multi-sensor analysis measuring pH, TDS, electrical conductivity, turbidity, and temperature via HC-05 Bluetooth.',
       icon: 'activity',
       badge: '5 Parameters',
     },
@@ -43,7 +44,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header Branding */}
         <View style={styles.header}>

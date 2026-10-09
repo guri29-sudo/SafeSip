@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography } from '../theme';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
@@ -27,8 +27,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 }) => {
   const { login } = useAppStore();
 
-  const [emailOrPhone, setEmailOrPhone] = useState('vedant@safesip.org');
-  const [password, setPassword] = useState('SecurePass2026!');
+  const [emailOrPhone, setEmailOrPhone] = useState('');
+  const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -78,7 +78,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}

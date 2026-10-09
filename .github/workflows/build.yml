@@ -8,9 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ─────────────────────────── Android ───────────────────────────────────────
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,38 +29,74 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install Dependencies
-        run: npm ci || npm install
+      - name: Install JS Dependencies
+        run: npm ci
 
-      - name: Bundle Standalone Offline JavaScript
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Inject Supabase Secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p src/config
+          cat << EOF > src/config/env.local.ts
+          export const ENV = {
+            SUPABASE_URL: '${SUPABASE_URL}',
+            SUPABASE_ANON_KEY: '${SUPABASE_ANON_KEY}',
+          };
+          EOF
+
+      - name: Bundle Android JavaScript
         run: |
           mkdir -p android/app/src/main/assets
-          npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
       - name: Build Android Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload Android APK Artifact
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: SafeSip-Android-Debug-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
+  # ─────────────────────────── iOS ────────────────────────────────────────────
   build-ios:
-    name: Build iOS Archive (iPhone 15)
+    name: Build iOS Archive
     runs-on: macos-15
+    timeout-minutes: 45       # ← Prevents infinite hang; kills after 45 min
+
+    env:
+      # Disable Flipper — causes pod install hangs on CI with React Native 0.73+
+      NO_FLIPPER: '1'
+      # Fix known Xcode 16 CI serialisation hang
+      SWIFT_SERIALIZE_DEBUGGING_OPTIONS: 'NO'
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16.1+
+      - name: Select Best Available Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app || \
-          sudo xcode-select -s /Applications/Xcode_16.1.app || \
-          sudo xcode-select -s /Applications/Xcode_16.app || \
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer 2>/dev/null || \
+          sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer 2>/dev/null || \
+          sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer 2>/dev/null || true
           xcodebuild -version
 
       - name: Set up Node.js
@@ -67,45 +105,95 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install Dependencies
-        run: npm ci || npm install
+      - name: Install JS Dependencies
+        run: npm ci
 
-      - name: Configure Xcode Node Environment
+      - name: Write Xcode NODE_BINARY env file
         working-directory: ios
-        run: |
-          echo "export NODE_BINARY=$(which node)" > .xcode.env.local
-          cat .xcode.env.local
+        run: echo "export NODE_BINARY=$(which node)" > .xcode.env.local
+
+      # Cache CocoaPods to avoid re-downloading on every run (the main hang cause)
+      - name: Cache CocoaPods
+        id: cocoapods-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ios/Pods
+            ios/Podfile.lock
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+          key: cocoapods-${{ runner.os }}-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock') }}
+          restore-keys: cocoapods-${{ runner.os }}-
 
       - name: Install CocoaPods
+        if: steps.cocoapods-cache.outputs.cache-hit != 'true'
         working-directory: ios
-        run: pod install
+        run: |
+          # Update pod repo before install to avoid stale spec errors
+          pod repo update --silent
+          pod install --verbose
+        timeout-minutes: 20     # ← Kill pod install if it hangs
+
+      - name: Inject Supabase Secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          mkdir -p src/config
+          cat << EOF > src/config/env.local.ts
+          export const ENV = {
+            SUPABASE_URL: '${SUPABASE_URL}',
+            SUPABASE_ANON_KEY: '${SUPABASE_ANON_KEY}',
+          };
+          EOF
 
       - name: Bundle iOS JavaScript
         run: |
-          npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ios/main.jsbundle --assets-dest ios
+          npx react-native bundle \
+            --platform ios \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output ios/main.jsbundle \
+            --assets-dest ios
 
-      - name: Build iOS Application for iPhone (arm64)
+      - name: Build iOS (arm64, no code signing)
         working-directory: ios
         run: |
-          xcodebuild -workspace SafeSip.xcworkspace \
+          xcodebuild \
+            -workspace SafeSip.xcworkspace \
             -scheme SafeSip \
             -configuration Debug \
             -sdk iphoneos \
+            -arch arm64 \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            PROVISIONING_PROFILE="" \
+            SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO \
+            -allowProvisioningUpdates 2>&1 | xcpretty || xcodebuild \
+            -workspace SafeSip.xcworkspace \
+            -scheme SafeSip \
+            -configuration Debug \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO
+        timeout-minutes: 25     # ← Kill xcodebuild if it hangs
 
-      - name: Package IPA for iPhone 15 Sideloading
+      - name: Package IPA
         working-directory: ios
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Debug-iphoneos/SafeSip.app Payload/
-          zip -r SafeSip-iPhone15.ipa Payload
+          zip -r SafeSip-Debug.ipa Payload
 
-      - name: Upload iOS IPA Artifact
+      - name: Upload iOS IPA
         uses: actions/upload-artifact@v4
         with:
-          name: SafeSip-iOS-iPhone15-IPA
-          path: ios/SafeSip-iPhone15.ipa
+          name: SafeSip-iOS-Debug-IPA
+          path: ios/SafeSip-Debug.ipa
+

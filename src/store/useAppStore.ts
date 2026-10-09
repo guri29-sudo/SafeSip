@@ -5,12 +5,12 @@ import {
   WaterTest,
   WaterSource,
   SensorReading,
-  SafetyStatus,
   SyncQueueItem,
 } from '../types';
 import { dbService } from '../database/storageService';
 import { bleService, BleConnectionState } from '../bluetooth/BleService';
 import { syncWorker } from '../api/syncWorker';
+import { supabase, isSupabaseConfigured } from '../api/supabaseClient';
 
 interface AppState {
   // --- Auth ---
@@ -23,7 +23,7 @@ interface AppState {
   // --- Bluetooth Hardware ---
   connectedDevice: Device | null;
   discoveredDevices: Device[];
-  bleState: BleConnectionState;
+  bleState: BleConnectionState; // 'disconnected'|'scanning'|'connecting'|'connected'|'permission_denied'|'bluetooth_off'
   startBleScan: () => Promise<void>;
   connectBleDevice: (deviceId: string) => Promise<void>;
   disconnectBleDevice: () => Promise<void>;
@@ -52,6 +52,8 @@ interface AppState {
   setSelectedSourceId: (id: string | null) => void;
   setMapSearchQuery: (query: string) => void;
   setMapStatusFilter: (filter: 'ALL' | 'SAFE' | 'CAUTION' | 'UNSAFE' | 'UNVERIFIED') => void;
+  loadUserSources: () => Promise<void>;
+  subscribeToRealtimeSources: () => () => void;
 
   // --- Offline & Sync ---
   isOffline: boolean;
@@ -66,90 +68,160 @@ interface AppState {
 }
 
 const defaultSensorReading: SensorReading = {
-  pH: 7.4,
-  tds: 125,
-  conductivity: 310,
-  turbidity: 0.8,
-  temperature: 22.5,
+  pH: 0,
+  tds: 0,
+  conductivity: 0,
+  turbidity: 0,
+  temperature: 0,
   timestamp: new Date().toISOString(),
   overallStatus: 'SAFE',
 };
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // Auth
+  // Auth — start unauthenticated; user must log in for real
   currentUser: dbService.getCurrentUser(),
-  isAuthenticated: true, // Preset logged in as Vedant for seamless experience
+  isAuthenticated: dbService.getCurrentUser() !== null,
 
-  login: async (emailOrPhone, _password) => {
-    const user: User = {
-      id: 'usr-vedant-01',
-      fullName: 'Vedant',
-      email: emailOrPhone.includes('@') ? emailOrPhone : 'vedant@safesip.org',
-      phone: emailOrPhone.includes('@') ? '+1 (555) 382-9901' : emailOrPhone,
-      createdAt: new Date().toISOString(),
-    };
-    dbService.setCurrentUser(user);
-    set({ currentUser: user, isAuthenticated: true });
-    return true;
+  login: async (emailOrPhone, password) => {
+    if (isSupabaseConfigured()) {
+      // Real Supabase email auth
+      const isEmail = emailOrPhone.includes('@');
+      let authResult;
+      if (isEmail) {
+        authResult = await supabase.auth.signInWithPassword({
+          email: emailOrPhone,
+          password: password || '',
+        });
+      } else {
+        // Phone-based login via OTP (simplified: use email as fallback)
+        authResult = await supabase.auth.signInWithPassword({
+          email: emailOrPhone,
+          password: password || '',
+        });
+      }
+
+      if (authResult.error) {
+        throw new Error(authResult.error.message);
+      }
+
+      const sbUser = authResult.data.user;
+      if (!sbUser) throw new Error('Authentication failed');
+
+      // Fetch profile from supabase profiles table if it exists
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', sbUser.id)
+        .single();
+
+      const user: User = {
+        id: sbUser.id,
+        fullName: profile?.full_name || sbUser.user_metadata?.full_name || sbUser.email || 'User',
+        email: sbUser.email || emailOrPhone,
+        phone: profile?.phone || sbUser.phone || undefined,
+        createdAt: sbUser.created_at,
+      };
+
+      dbService.setCurrentUser(user);
+      set({ currentUser: user, isAuthenticated: true });
+
+      // Fetch their test history from Supabase
+      await get().loadUserSources();
+      return true;
+    } else {
+      // Local-only mode when Supabase is not configured
+      const user: User = {
+        id: `local-${Date.now()}`,
+        fullName: emailOrPhone.split('@')[0] || 'User',
+        email: emailOrPhone.includes('@') ? emailOrPhone : `${emailOrPhone}@local.app`,
+        createdAt: new Date().toISOString(),
+      };
+      dbService.setCurrentUser(user);
+      set({ currentUser: user, isAuthenticated: true });
+      return true;
+    }
   },
 
-  signUp: async (fullName, email, phone, _password) => {
-    const user: User = {
-      id: `usr-${Date.now()}`,
-      fullName,
-      email,
-      phone,
-      createdAt: new Date().toISOString(),
-    };
-    dbService.setCurrentUser(user);
-    set({ currentUser: user, isAuthenticated: true });
-    return true;
+  signUp: async (fullName, email, phone, password) => {
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: password || '',
+        options: {
+          data: { full_name: fullName, phone },
+        },
+      });
+
+      if (error) throw new Error(error.message);
+      if (!data.user) throw new Error('Sign-up failed. Please try again.');
+
+      // Upsert profile record
+      await supabase.from('profiles').upsert({
+        id: data.user.id,
+        full_name: fullName,
+        email,
+        phone,
+        created_at: new Date().toISOString(),
+      });
+
+      const user: User = {
+        id: data.user.id,
+        fullName,
+        email,
+        phone,
+        createdAt: new Date().toISOString(),
+      };
+      dbService.setCurrentUser(user);
+      set({ currentUser: user, isAuthenticated: true });
+      return true;
+    } else {
+      // Local-only sign-up
+      const user: User = {
+        id: `local-${Date.now()}`,
+        fullName,
+        email,
+        phone,
+        createdAt: new Date().toISOString(),
+      };
+      dbService.setCurrentUser(user);
+      set({ currentUser: user, isAuthenticated: true });
+      return true;
+    }
   },
 
-  logout: () => {
+  logout: async () => {
+    if (isSupabaseConfigured()) {
+      await supabase.auth.signOut();
+    }
     dbService.setCurrentUser(null);
-    set({ currentUser: null, isAuthenticated: false });
+    set({
+      currentUser: null,
+      isAuthenticated: false,
+      tests: [],
+      sources: [],
+      connectedDevice: null,
+      bleState: 'disconnected',
+      lastCompletedTest: null,
+    });
   },
 
-  // Bluetooth
+  // Bluetooth — start disconnected; no fake pre-connected devices
   connectedDevice: bleService.getConnectedDevice(),
-  discoveredDevices: [
-    {
-      id: 'safesip-0012',
-      name: 'SafeSip_0012',
-      macAddress: 'C4:4F:33:18:00:12',
-      rssi: -58,
-      batteryLevel: 88,
-      isConnected: true,
-      firmwareVersion: 'v2.1.0-esp32',
-    },
-    {
-      id: 'safesip-0048',
-      name: 'SafeSip_0048',
-      macAddress: 'C4:4F:33:18:00:48',
-      rssi: -72,
-      batteryLevel: 64,
-      isConnected: false,
-      firmwareVersion: 'v2.0.4-esp32',
-    },
-    {
-      id: 'safesip-7781',
-      name: 'SafeSip_7781',
-      macAddress: 'C4:4F:33:18:77:81',
-      rssi: -84,
-      batteryLevel: 42,
-      isConnected: false,
-      firmwareVersion: 'v2.1.0-esp32',
-    },
-  ],
-  bleState: 'connected',
+  discoveredDevices: [],
+  bleState: bleService.getConnectionState(),
 
   startBleScan: async () => {
-    set({ bleState: 'scanning' });
+    // bleService manages its own state (permission_denied, bluetooth_off, etc.)
+    // subscribe to propagate state changes back to the store
+    const unsub = bleService.onConnectionStateChange(state => {
+      set({ bleState: state });
+    });
+
     await bleService.startScan(devices => {
       set({ discoveredDevices: devices });
     });
-    set({ bleState: get().connectedDevice ? 'connected' : 'disconnected' });
+
+    unsub(); // remove listener after scan completes
   },
 
   connectBleDevice: async (deviceId: string) => {
@@ -204,16 +276,36 @@ export const useAppStore = create<AppState>((set, get) => ({
           testStage: stage,
         });
       },
-      finalReading => {
-        // Build completed WaterTest with phone GPS enrichment
+      async finalReading => {
+        const user = get().currentUser;
+        const device = get().connectedDevice;
+
+        let testLat = 37.7749;
+        let testLng = -122.4194;
+        try {
+          const globalNav = (globalThis as any)?.navigator;
+          if (globalNav?.geolocation) {
+            globalNav.geolocation.getCurrentPosition(
+              (pos: any) => {
+                if (pos?.coords) {
+                  testLat = pos.coords.latitude;
+                  testLng = pos.coords.longitude;
+                }
+              },
+              () => {},
+              { timeout: 3000 }
+            );
+          }
+        } catch {}
+
         const newTest: WaterTest = {
           id: `test-${Date.now()}`,
-          deviceId: get().connectedDevice?.id || 'safesip-0012',
-          userId: get().currentUser?.id || 'usr-vedant-01',
-          sourceName: 'Lake View Reservoir',
-          latitude: 37.7749,
-          longitude: -122.4194,
-          locationName: 'North Basin, Shoreline Trail',
+          deviceId: device?.id || 'HC-05-Sensor',
+          userId: user?.id || 'anonymous',
+          sourceName: 'SafeSip Field Sample',
+          locationName: 'Current Location',
+          latitude: testLat,
+          longitude: testLng,
           timestamp: new Date().toISOString(),
           pH: finalReading.pH,
           tds: finalReading.tds,
@@ -225,6 +317,45 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
 
         dbService.saveTest(newTest);
+
+        // Push to Supabase if configured and online (instantly broadcasts to all users via Realtime)
+        if (isSupabaseConfigured() && !get().isOffline) {
+          try {
+            await supabase.from('water_tests').insert([{
+              id: newTest.id,
+              device_id: newTest.deviceId,
+              user_id: newTest.userId,
+              latitude: newTest.latitude,
+              longitude: newTest.longitude,
+              location_name: newTest.locationName,
+              ph: newTest.pH,
+              tds: newTest.tds,
+              conductivity: newTest.conductivity,
+              turbidity: newTest.turbidity,
+              temperature: newTest.temperature,
+              safety_status: newTest.safetyStatus,
+              measured_at: newTest.timestamp,
+            }]);
+
+            // Register/update as community water source so all connected users see the new point on heatmap
+            await supabase.from('water_sources').insert([{
+              name: newTest.sourceName || 'Field Water Point',
+              location_name: newTest.locationName || 'Sample Location',
+              latitude: newTest.latitude,
+              longitude: newTest.longitude,
+              safety_status: newTest.safetyStatus,
+              latest_ph: newTest.pH,
+              latest_tds: newTest.tds,
+              latest_conductivity: newTest.conductivity,
+              latest_turbidity: newTest.turbidity,
+              latest_temperature: newTest.temperature,
+              last_tested_at: newTest.timestamp,
+              test_count: 1,
+            }]);
+          } catch {
+            newTest.syncStatus = 'pending';
+          }
+        }
 
         set({
           isTesting: false,
@@ -289,6 +420,67 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ mapStatusFilter: filter });
   },
 
+  loadUserSources: async () => {
+    if (isSupabaseConfigured()) {
+      const { data, error } = await supabase
+        .from('water_sources')
+        .select('*')
+        .order('last_tested_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        const mapped: WaterSource[] = data.map((row: any) => ({
+          id: row.id,
+          name: row.name,
+          locationName: row.location_name,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          safetyStatus: row.safety_status,
+          latestPh: row.latest_ph,
+          latestTds: row.latest_tds,
+          latestConductivity: row.latest_conductivity,
+          latestTurbidity: row.latest_turbidity,
+          latestTemperature: row.latest_temperature,
+          lastTestedAt: row.last_tested_at,
+          testCount: row.test_count || 0,
+          description: row.description,
+        }));
+        set({ sources: mapped });
+        return;
+      }
+    }
+    // Fallback: use local db sources (community data from BLE tests)
+    set({ sources: dbService.getAllSources() });
+  },
+
+  subscribeToRealtimeSources: () => {
+    if (!isSupabaseConfigured()) {
+      return () => {};
+    }
+
+    const channel = supabase
+      .channel('public:community_sources_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'water_sources' },
+        () => {
+          // Instantly sync community heatmap data across all devices
+          get().loadUserSources();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'water_tests' },
+        () => {
+          get().loadUserSources();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
+
   // Offline & Sync
   isOffline: false,
   syncQueue: dbService.getSyncQueue(),
@@ -315,3 +507,4 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeTab: tab });
   },
 }));
+

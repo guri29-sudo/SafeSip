@@ -4,10 +4,10 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   Share,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { Header } from '../components/Header';
@@ -28,25 +28,25 @@ export const TestResultsScreen: React.FC<TestResultsScreenProps> = ({
   onSave,
   onBack,
 }) => {
-  const { lastCompletedTest, saveTestResult, isOffline } = useAppStore();
+  const { lastCompletedTest, saveTestResult, isOffline, currentUser, connectedDevice } = useAppStore();
   const [isSaved, setIsSaved] = useState(false);
 
   const test = testResult || lastCompletedTest || {
-    id: 'test-demo',
-    deviceId: 'SafeSip_0012',
-    userId: 'usr-vedant-01',
-    sourceName: 'Lake View Reservoir',
-    locationName: 'North Basin, Shoreline Trail',
-    latitude: 37.7749,
-    longitude: -122.4194,
+    id: `test-${Date.now()}`,
+    deviceId: connectedDevice?.id || 'HC-05-Sensor',
+    userId: currentUser?.id || 'anonymous',
+    sourceName: 'Fresh Water Sample',
+    locationName: 'Current Location',
+    latitude: 0,
+    longitude: 0,
     timestamp: new Date().toISOString(),
-    pH: 7.4,
-    tds: 125,
-    conductivity: 310,
+    pH: 7.0,
+    tds: 150,
+    conductivity: 300,
     turbidity: 0.8,
-    temperature: 22.5,
+    temperature: 22.0,
     safetyStatus: 'SAFE' as const,
-    syncStatus: 'synced' as const,
+    syncStatus: 'pending' as const,
   };
 
   const handleShare = async () => {
@@ -73,10 +73,10 @@ export const TestResultsScreen: React.FC<TestResultsScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <Header
         title="Test Results"
-        subtitle="ESP32 Physicochemical Classification"
+        subtitle="Water Quality Physicochemical Classification"
         onBack={onBack}
       />
 

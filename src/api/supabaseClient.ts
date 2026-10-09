@@ -1,14 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config/env';
 
-// Environment variables or fallback credentials
-const SUPABASE_URL = 'https://safesip-water-quality.supabase.co';
-const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.SafeSipAnonymousAccessKeySecureProduction2026';
+/**
+ * Supabase client configuration.
+ * Credentials are loaded safely from ../config/env (or local/CI environment).
+ */
+const safeUrl = SUPABASE_URL || 'https://placeholder.supabase.co';
+const safeKey = SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export const supabase = createClient(safeUrl, safeKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
   },
 });
+
+/**
+ * Returns true only if real Supabase credentials have been configured.
+ * When false, the app runs in local-only / offline mode.
+ */
+export const isSupabaseConfigured = (): boolean =>
+  Boolean(
+    SUPABASE_URL &&
+    SUPABASE_ANON_KEY &&
+    !SUPABASE_URL.includes('placeholder') &&
+    !SUPABASE_URL.includes('YOUR_PROJECT_REF') &&
+    SUPABASE_URL.startsWith('https://') &&
+    SUPABASE_URL.includes('.supabase.co')
+  );
+

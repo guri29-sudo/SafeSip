@@ -32,8 +32,10 @@ CREATE TABLE IF NOT EXISTS public.water_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     location_name TEXT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
     -- PostGIS Point Geometry: Longitude, Latitude (WGS84 SRID 4326)
-    location GEOGRAPHY(POINT, 4326) NOT NULL,
+    location GEOGRAPHY(POINT, 4326),
     safety_status TEXT NOT NULL CHECK (safety_status IN ('SAFE', 'CAUTION', 'UNSAFE', 'UNVERIFIED')),
     latest_ph NUMERIC(4,2),
     latest_tds INT,
@@ -57,7 +59,9 @@ CREATE TABLE IF NOT EXISTS public.water_tests (
     device_id TEXT REFERENCES public.devices(id) ON DELETE SET NULL,
     user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
     source_id UUID REFERENCES public.water_sources(id) ON DELETE SET NULL,
-    location GEOGRAPHY(POINT, 4326) NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    location GEOGRAPHY(POINT, 4326),
     location_name TEXT,
     ph NUMERIC(4,2) NOT NULL,
     tds INT NOT NULL,
@@ -151,3 +155,25 @@ CREATE POLICY "Allow authenticated users to log water tests"
 CREATE POLICY "Allow users to manage own paired devices"
     ON public.devices FOR ALL
     USING (auth.uid() = user_id);
+
+-- 9. Automatic PostGIS Location Trigger from Latitude & Longitude
+CREATE OR REPLACE FUNCTION set_postgis_location()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.location := ST_SetSRID(ST_MakePoint(NEW.longitude, NEW.latitude), 4326);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_water_sources_location
+BEFORE INSERT OR UPDATE OF latitude, longitude ON public.water_sources
+FOR EACH ROW EXECUTE FUNCTION set_postgis_location();
+
+CREATE TRIGGER trg_water_tests_location
+BEFORE INSERT OR UPDATE OF latitude, longitude ON public.water_tests
+FOR EACH ROW EXECUTE FUNCTION set_postgis_location();
+
+-- 10. Enable Supabase Realtime Replication (Instant live Heatmap updates for all connected users)
+ALTER PUBLICATION supabase_realtime ADD TABLE public.water_sources;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.water_tests;
+

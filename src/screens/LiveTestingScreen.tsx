@@ -1,11 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
+  Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, typography, shadows } from '../theme';
 import { useAppStore } from '../store/useAppStore';
 import { Header } from '../components/Header';
@@ -34,17 +35,36 @@ export const LiveTestingScreen: React.FC<LiveTestingScreenProps> = ({
     cancelLiveTest,
   } = useAppStore();
 
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
   useEffect(() => {
+    // Pulse animation during active test
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.08,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulseLoop.start();
+
     // Start live sampling sequence on screen mount
     startLiveTest(result => {
       onComplete(result);
     });
 
     return () => {
-      // Cleanup on unmount if canceled early
+      pulseLoop.stop();
       cancelLiveTest();
     };
-  }, []);
+  }, [pulseAnim]);
 
   const handleCancel = () => {
     cancelLiveTest();
@@ -52,10 +72,10 @@ export const LiveTestingScreen: React.FC<LiveTestingScreenProps> = ({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <Header
         title="Live Testing"
-        subtitle={connectedDevice ? `${connectedDevice.name} • Active BLE Telemetry` : 'BLE Stream'}
+        subtitle={connectedDevice ? `${connectedDevice.name} • Active HC-05 Telemetry` : 'Sensor Stream'}
         onBack={handleCancel}
       />
 
@@ -78,7 +98,7 @@ export const LiveTestingScreen: React.FC<LiveTestingScreenProps> = ({
 
         {/* Large Circular / Radial Progress Indicator */}
         <View style={styles.progressHeroSection}>
-          <View style={styles.circularContainer}>
+          <Animated.View style={[styles.circularContainer, { transform: [{ scale: pulseAnim }] }]}>
             {/* Outer Progress Track */}
             <View style={styles.outerTrack}>
               {/* Inner Active Ring Container */}
@@ -87,19 +107,19 @@ export const LiveTestingScreen: React.FC<LiveTestingScreenProps> = ({
                 <Text style={styles.progressSubtext}>Sampling</Text>
               </View>
             </View>
-          </View>
+          </Animated.View>
 
           <Text style={styles.collectingHeading}>Collecting sensor data…</Text>
           <Text style={styles.stageDescription}>{testStage}</Text>
         </View>
 
-        {/* Live Parameter Values Updating via BLE */}
+        {/* Live Parameter Values Updating via Bluetooth */}
         <View style={styles.parametersSection}>
           <View style={styles.paramsHeaderRow}>
             <Text style={styles.paramsTitle}>Real-Time Sensor Readings</Text>
             <View style={styles.liveTag}>
               <View style={styles.liveDot} />
-              <Text style={styles.liveTagText}>LIVE GATT</Text>
+              <Text style={styles.liveTagText}>LIVE HC-05</Text>
             </View>
           </View>
 
